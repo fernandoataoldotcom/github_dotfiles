@@ -16,3 +16,4 @@ zshrc
 cp tools/* ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/
 
 cp .tmux.conf ~
+cp .zshrc ~/.zshrc
