@@ -1,0 +1,42 @@
+eks-auth() {
+    region="us-west-2"
+    cluster="captain-cluster"
+
+    # Parse flags
+    source .env
+
+    while [[ $# -gt 0 ]]; do
+      key="$1"
+      case $key in
+        (-r|--region)
+          region="$2"
+          shift
+          shift
+          ;;
+        (-c|--cluster)
+          cluster="$2"
+          shift
+          shift
+          ;;
+        (--help)
+          echo "Usage: eks-auth [options]"
+          echo ""
+          echo "Options:"
+          echo "  -r, --region VALUE    Set the region of the cluster (default: us-west-2)"
+          echo "  -c, --cluster VALUE    Set the name of the cluster (default: captain-cluster)"
+          echo "  --help              Show this help message and exit"
+          return
+          ;;
+        (*)
+          echo "Unknown option: $key"
+          echo "Run 'eks-auth --help' for usage information."
+          return
+          ;;
+      esac
+    done
+
+    aws eks update-kubeconfig \
+      --region $region \
+      --name $cluster
+
+}

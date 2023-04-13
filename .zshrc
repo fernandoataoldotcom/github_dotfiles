@@ -77,8 +77,6 @@ plugins=(
   git
   zsh-autosuggestions
   zsh-syntax-highlighting
-  pyenv
-  zsh-tfenv
 )
 
 source $ZSH/oh-my-zsh.sh
