@@ -143,3 +143,8 @@ alias tfa='terraform apply'
 alias tfs='terraform show'
 alias tfl='terraform login'
 alias tc='terraform console'
+
+
+# kubectl autocomplete
+autoload -U +X compinit && compinit
+source <(kubectl completion zsh)
