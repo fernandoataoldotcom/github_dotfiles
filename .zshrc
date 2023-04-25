@@ -144,7 +144,7 @@ alias k='kubectl'
 alias h='helm'
 alias hru='helm repo update'
 alias hu='helm upgrade'
-alias hdu='helm diff update'
+alias hdu='helm diff upgrade'
 
 
 # kubectl autocomplete
