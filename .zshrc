@@ -124,15 +124,10 @@ alias t='tmux'
 # GIT
 alias gi='git init'
 alias gs='git status'
-alias ga='git add'
-alias gb='git branch'
 alias gc='git commit -m'
 alias gp='git push'
 alias gl='git pull'
-alias gd='git diff'
-alias glog='git log'
 alias gpt='git push --tag'
-alias gk='git checkout'
 
 # TERRAFORM
 alias tf='terraform'
@@ -143,6 +138,13 @@ alias tfa='terraform apply'
 alias tfs='terraform show'
 alias tfl='terraform login'
 alias tc='terraform console'
+
+# KUBERNETES
+alias k='kubectl'
+alias h='helm'
+alias hru='helm repo update'
+alias hu='helm update'
+alias hdu='helm diff update'
 
 
 # kubectl autocomplete
