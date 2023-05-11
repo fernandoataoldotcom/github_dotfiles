@@ -129,6 +129,9 @@ alias gp='git push'
 alias gl='git pull'
 alias gpt='git push --tag'
 
+# CODESPACES
+GITHUB_TOKEN=$GH_PAT
+
 # TERRAFORM
 alias tf='terraform'
 alias tff='terraform fmt --recursive'
