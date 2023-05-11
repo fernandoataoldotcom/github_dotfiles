@@ -131,6 +131,7 @@ alias gpt='git push --tag'
 
 # CODESPACES
 GITHUB_TOKEN=$GH_PAT
+alias ghrc='gh repo clone'
 
 # TERRAFORM
 alias tf='terraform'
