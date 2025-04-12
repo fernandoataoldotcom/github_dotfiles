@@ -145,13 +145,18 @@ alias tfl='terraform login'
 alias tc='terraform console'
 
 # KUBERNETES
-alias k='kubectl'
-alias h='helm'
-alias hru='helm repo update'
-alias hu='helm upgrade'
-alias hdu='helm diff upgrade'
+if command -v kubectl &>/dev/null; then
+  alias k='kubectl'
 
+  # Load kubectl completion only if kubectl exists
+  autoload -U +X compinit && compinit
+  source <(kubectl completion zsh)
+fi
 
-# kubectl autocomplete
-autoload -U +X compinit && compinit
-source <(kubectl completion zsh)
+# HELM
+if command -v helm &>/dev/null; then
+  alias h='helm'
+  alias hru='helm repo update'
+  alias hu='helm upgrade'
+  alias hdu='helm diff upgrade'
+fi
