@@ -1,0 +1,201 @@
+#!/bin/zsh
+#
+# dotfiles installer | https://github.com/fernandoataoldotcom/github_dotfiles
+# Served at https://setup.<your-domain>   (Cloudflare Pages, served as text/plain)
+#
+#   Install:  curl setup.<your-domain> | zsh
+#   Read it:  open the URL in a browser. Cloudflare Pages serves this file as
+#             text/plain, so the browser shows it as raw monospace text and
+#             `curl ... | zsh` runs it as a script. No HTML tricks needed.
+#
+# Linux/Debian only -- used mostly over SSH / remote VMs / devcontainers.
+# Installs Oh-My-Zsh + zsh plugins + config files (zsh, tmux, vim, htop, claude).
+# Does NOT install system packages -- install tmux/gh/jq/kubectl/vim yourself
+# (see README). Safe to re-run; backs up anything it would overwrite.
+
+set -euo pipefail
+
+# Which version of this repo to install config files from. An interactive run
+# ALWAYS prompts you to choose (the menu uses /dev/tty, so `curl ... | zsh` works).
+# Escape hatches: REPO_RAW (explicit source, e.g. file:///repo for tests) overrides
+# everything; and only when there is NO TTY, DOTFILES_REF / `zsh -s -- <tag>`, else
+# newest tag, else main. Use immutable tags for reproducible, tamper-evident installs.
+REPO_SLUG="${REPO_SLUG:-fernandoataoldotcom/github_dotfiles}"
+REPO_RAW="${REPO_RAW:-}"
+DOTFILES_REF="${DOTFILES_REF:-}"
+
+# --- Pinned dependency versions (resolved 2026-06-26) ------------------------
+# Pinned for reproducible, supply-chain-safe installs. Bump deliberately.
+# OMZ/vim-plug use commit SHAs (content-addressed). zsh plugins are cloned by tag
+# but the resolved commit is VERIFIED against a pinned SHA (tags are mutable).
+OMZ_REF="d2379b2701df66a36b217a7707e77f8029a99814"          # ohmyzsh/ohmyzsh
+VIM_PLUG_REF="88e31471818e9a29a8a20a0ee61360cfd7bdc1cd"     # junegunn/vim-plug
+ZSH_SYNTAX_HIGHLIGHTING_REF="0.8.0";  ZSH_SYNTAX_HIGHLIGHTING_SHA="db085e4661f6aafd24e5acb5b2e17e4dd5dddf3e"
+ZSH_AUTOSUGGESTIONS_REF="v0.7.1";     ZSH_AUTOSUGGESTIONS_SHA="e52ee8ca55bcc56a17c828767a3f98f22a68d4eb"
+YOU_SHOULD_USE_REF="1.11.1";          YOU_SHOULD_USE_SHA="ff371d6a11b653e1fa8dda4e61c896c78de26bfa"
+
+TS="$(date +%Y%m%d-%H%M%S)"
+BACKUP_DIR="${HOME}/.dotfiles-backup-${TS}"
+
+log()  { print -r -- "==> $*"; }
+warn() { print -r -- "WARN: $*" >&2; }
+die()  { print -r -- "ERROR: $*" >&2; exit 1; }
+
+os_guard() {
+  [[ "$(uname -s)" == "Linux" ]] || die "Linux (Debian/Ubuntu) only. Detected $(uname -s). Aborting."
+  if [[ -r /etc/os-release ]]; then
+    local id idlike
+    id="$(. /etc/os-release 2>/dev/null; print -r -- "${ID:-}")"
+    idlike="$(. /etc/os-release 2>/dev/null; print -r -- "${ID_LIKE:-}")"
+    [[ "$id" == debian || "$id" == ubuntu || "$idlike" == *debian* ]] \
+      || warn "Non Debian/Ubuntu Linux (ID='$id'); continuing but untested."
+  fi
+  command -v git  >/dev/null 2>&1 || die "git is required. Install it and re-run."
+  command -v curl >/dev/null 2>&1 || die "curl is required. Install it and re-run."
+}
+
+# This repo's tags, newest first (empty if none / offline).
+list_tags() {
+  git ls-remote --tags --refs "https://github.com/${REPO_SLUG}" 2>/dev/null \
+    | awk -F/ '{print $NF}' | sort -rV
+}
+
+# Interactive picker -- called only when /dev/tty is available. The menu is written
+# to and read from /dev/tty (works even though the piped script is stdin); only the
+# chosen ref is printed to stdout so it can be captured.
+pick_tag() {
+  local tags; tags="$(list_tags)"
+  if [[ -z "$tags" ]]; then
+    warn "No tags on ${REPO_SLUG} yet -- cut one (git tag v1 && git push --tags) to enable version selection. Installing from 'main'."
+    print -r -- "refs/heads/main"; return 0
+  fi
+  local -a arr=("${(@f)tags}")
+  arr+=("refs/heads/main")                       # offer 'latest main' as a choice too
+  {
+    print -r -- ""
+    print -r -- "Which version of ${REPO_SLUG} do you want to install?"
+    local i label
+    for (( i = 1; i <= ${#arr[@]}; i++ )); do
+      label="${arr[$i]}"; [[ "$label" == "refs/heads/main" ]] && label="main (latest, unpinned)"
+      print -r -- "  ${i}) ${label}"
+    done
+    print -rn -- "Enter a number [default 1 = ${arr[1]}]: "
+  } >/dev/tty
+  local choice=""
+  read -r choice </dev/tty || true
+  if [[ -z "$choice" ]]; then
+    print -r -- "${arr[1]}"
+  elif [[ "$choice" == <-> ]] && (( choice >= 1 && choice <= ${#arr[@]} )); then
+    print -r -- "${arr[$choice]}"
+  else
+    print -r -- "$choice"                        # treat input as a literal tag/ref name
+  fi
+}
+
+# Resolve REPO_RAW. Interactive runs ALWAYS prompt; REPO_RAW / DOTFILES_REF are
+# escape hatches for automation.
+select_repo_ref() {
+  if [[ -n "$REPO_RAW" ]]; then
+    log "Using REPO_RAW override: ${REPO_RAW}"; return 0
+  fi
+  local ref=""
+  # A real controlling terminal? Test by *opening* /dev/tty -- `[[ -r /dev/tty ]]`
+  # only checks the device's permission bits (always rw), not whether a tty exists.
+  if { true </dev/tty; } 2>/dev/null; then
+    ref="$(pick_tag)"                            # interactive: always ask the human
+  else
+    ref="${DOTFILES_REF:-${1:-}}"                # no TTY (CI/automation): env / positional
+    if [[ -z "$ref" ]]; then
+      local tags; tags="$(list_tags)"
+      if [[ -n "$tags" ]]; then local -a arr=("${(@f)tags}"); ref="${arr[1]}"; else ref="refs/heads/main"; fi
+    fi
+    warn "No TTY; non-interactive install from ref: ${ref}"
+  fi
+  REPO_RAW="https://raw.githubusercontent.com/${REPO_SLUG}/${ref}"
+  log "Installing config files from ref: ${ref}"
+}
+
+backup_one() {                     # copy (not move) existing target into timestamped backup
+  local t="$1"; [[ -e "$t" || -L "$t" ]] || return 0
+  mkdir -p "$BACKUP_DIR"
+  local dest="${BACKUP_DIR}/${t#$HOME/}"
+  mkdir -p "${dest:h}"; cp -a "$t" "$dest"; log "  backed up: $t"
+}
+backup_existing() {
+  log "Backing up any existing files to ${BACKUP_DIR}"
+  for f in ~/.tmux.conf ~/.vimrc ~/.config/htop/htoprc ~/.zshrc ~/.claude/settings.json \
+           ~/.oh-my-zsh/custom/fernandoataoldotcom-functions.zsh; do
+    backup_one "$f"
+  done
+}
+
+install_omz() {                    # pinned clone; non-interactive; we ship our own .zshrc
+  if [[ -d ~/.oh-my-zsh ]]; then
+    log "Oh-My-Zsh already present; skipping."
+  else
+    # Clone + checkout a pinned commit instead of piping the upstream installer
+    # to sh (reproducible, and no remote script execution).
+    log "Installing Oh-My-Zsh (pinned @ ${OMZ_REF})"
+    git -c advice.detachedHead=false clone --quiet https://github.com/ohmyzsh/ohmyzsh ~/.oh-my-zsh
+    git -C ~/.oh-my-zsh -c advice.detachedHead=false checkout --quiet "$OMZ_REF"
+  fi
+}
+
+fetch() { local u="$1" d="$2"; mkdir -p "${d:h}"; curl -fsSL "$u" -o "$d"; log "  fetched: $d"; }
+fetch_configs() {
+  log "Fetching configs and custom scripts"
+  mkdir -p ~/.oh-my-zsh/custom
+  fetch "${REPO_RAW}/zshrc"               ~/.zshrc
+  fetch "${REPO_RAW}/fernandoataoldotcom-functions.zsh" ~/.oh-my-zsh/custom/fernandoataoldotcom-functions.zsh
+  fetch "${REPO_RAW}/tmux.conf"           ~/.tmux.conf
+  fetch "${REPO_RAW}/htoprc"              ~/.config/htop/htoprc
+  fetch "${REPO_RAW}/vimrc"               ~/.vimrc
+  fetch "${REPO_RAW}/claude-settings.json" ~/.claude/settings.json
+  fetch "https://raw.githubusercontent.com/junegunn/vim-plug/${VIM_PLUG_REF}/plug.vim" ~/.vim/autoload/plug.vim
+}
+
+clone_plugin() {                   # idempotent; tolerates already-installed under set -e
+  local url="$1" ref="$2" sha="$3" dir="$4"
+  [[ -d "$dir/.git" ]] && { log "  plugin present: ${dir:t}"; return 0; }
+  [[ -e "$dir" ]] && { backup_one "$dir"; rm -rf "$dir"; }
+  git -c advice.detachedHead=false clone --depth 1 --branch "$ref" "$url" "$dir"
+  # Verify the tag resolved to the pinned commit (detects a moved/tampered tag).
+  local got; got="$(git -C "$dir" rev-parse HEAD)"
+  [[ "$got" == "$sha" ]] || die "Plugin ${dir:t}: tag '$ref' resolved to $got, expected $sha (moved/tampered tag?)."
+  log "  cloned: ${dir:t}@${ref} (verified ${sha})"
+}
+install_zsh_plugins() {
+  log "Installing zsh plugins"
+  local p=~/.oh-my-zsh/custom/plugins; mkdir -p "$p"
+  clone_plugin https://github.com/zsh-users/zsh-syntax-highlighting      "$ZSH_SYNTAX_HIGHLIGHTING_REF" "$ZSH_SYNTAX_HIGHLIGHTING_SHA" "$p/zsh-syntax-highlighting"
+  clone_plugin https://github.com/zsh-users/zsh-autosuggestions          "$ZSH_AUTOSUGGESTIONS_REF"     "$ZSH_AUTOSUGGESTIONS_SHA"     "$p/zsh-autosuggestions"
+  clone_plugin https://github.com/MichaelAquilina/zsh-you-should-use.git "$YOU_SHOULD_USE_REF"          "$YOU_SHOULD_USE_SHA"          "$p/you-should-use"
+}
+
+install_vim_plugins() {
+  if command -v vim >/dev/null 2>&1; then
+    log "Installing vim plugins (vim +PlugInstall +qall)"
+    vim -E -s -u ~/.vimrc +PlugInstall +qall </dev/null >/dev/null 2>&1 \
+      || warn "vim +PlugInstall returned non-zero (often harmless); re-run 'vim +PlugInstall +qall' if needed."
+  else
+    warn "vim not found; skipping. After installing vim, run: vim +PlugInstall +qall"
+  fi
+}
+
+main() {
+  os_guard
+  select_repo_ref "$@"
+  # Dry run: print the resolved source and stop (no changes made).
+  [[ -n "${DOTFILES_RESOLVE_ONLY:-}" ]] && { print -r -- "REPO_RAW=${REPO_RAW}"; return 0; }
+  backup_existing
+  install_omz
+  install_zsh_plugins
+  fetch_configs
+  install_vim_plugins
+  log "Done. Backups (if any): ${BACKUP_DIR}"
+  print -r -- ""
+  print -r -- "Next: start a fresh shell ('exec zsh'); reload tmux with 'tmux source-file ~/.tmux.conf'."
+  print -r -- "Install deps yourself if missing: tmux(>=3.2) gh jq kubectl vim"
+  print -r -- "Claude Code: settings are at ~/.claude/settings.json. Install the CLI separately if you want it."
+}
+main "$@"

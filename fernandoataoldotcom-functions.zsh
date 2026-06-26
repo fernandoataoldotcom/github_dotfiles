@@ -1,3 +1,6 @@
+# Personal zsh functions, auto-loaded by oh-my-zsh from $ZSH_CUSTOM.
+
+# go-rebase: interactive rebase from the merge-base with the default branch.
 go-rebase() {
     default_branch="main"
 

@@ -76,7 +76,9 @@ ZSH_THEME="fino-time"
 plugins=(
   git
   zsh-autosuggestions
+  kubectl
   zsh-syntax-highlighting
+  you-should-use
 )
 
 source $ZSH/oh-my-zsh.sh

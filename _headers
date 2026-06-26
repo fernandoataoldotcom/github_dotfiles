@@ -1,0 +1,8 @@
+# Cloudflare Pages: force the installer to be served as plain text so the
+# browser renders it (instead of downloading) and `curl ... | zsh` is clean.
+/install
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: no-cache
+/
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: no-cache
