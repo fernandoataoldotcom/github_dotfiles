@@ -7,7 +7,7 @@ devcontainers). One command sets up Oh-My-Zsh, zsh plugins, and my config files
 ## Install
 
 ```sh
-curl setup.<your-domain> | zsh
+curl setup.decentturing.com | zsh
 ```
 
 An interactive run prompts you to pick a tagged version (use immutable tags for
@@ -42,7 +42,7 @@ separately if you want it.
 
 ## Hosting (Cloudflare Pages)
 
-`setup.<your-domain>` serves the `install` script via Cloudflare Pages:
+`setup.decentturing.com` serves the `install` script via Cloudflare Pages:
 
 1. **Pages → Create a project → Connect to Git**, select this repo. No build command;
    output directory = repo root (`/`).
@@ -50,7 +50,7 @@ separately if you want it.
    script and `curl | zsh` stays clean.
 3. [`_redirects`](_redirects) rewrites `/` → `/install` (200) so the root URL serves the
    installer (no path needed).
-4. **Custom domains → Set up a domain** → `setup.<your-domain>` (DNS + TLS are automatic
+4. **Custom domains → Set up a domain** → `setup.decentturing.com` (DNS + TLS are automatic
    since the zone is on Cloudflare).
 
 ## Versioning

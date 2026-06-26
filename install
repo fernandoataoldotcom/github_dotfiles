@@ -1,9 +1,9 @@
 #!/bin/zsh
 #
 # dotfiles installer | https://github.com/fernandoataoldotcom/github_dotfiles
-# Served at https://setup.<your-domain>   (Cloudflare Pages, served as text/plain)
+# Served at https://setup.decentturing.com   (Cloudflare Pages, served as text/plain)
 #
-#   Install:  curl setup.<your-domain> | zsh
+#   Install:  curl setup.decentturing.com | zsh
 #   Read it:  open the URL in a browser. Cloudflare Pages serves this file as
 #             text/plain, so the browser shows it as raw monospace text and
 #             `curl ... | zsh` runs it as a script. No HTML tricks needed.
