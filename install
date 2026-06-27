@@ -195,11 +195,15 @@ install_claude_code() {
     return 0
   fi
   log "Installing Claude Code CLI"
-  if command -v npm >/dev/null 2>&1; then
-    npm install -g @anthropic-ai/claude-code \
-      || warn "npm install of Claude Code failed; try: curl -fsSL https://claude.ai/install.sh | bash"
+  # Prefer npm when a Node toolchain exists, but FALL BACK to the native installer
+  # if the npm global install fails (e.g. an unwritable prefix / no sudo in a
+  # devcontainer) -- otherwise a failed `npm -g` would leave the box without claude.
+  if command -v npm >/dev/null 2>&1 && npm install -g @anthropic-ai/claude-code; then
+    : # installed via npm
   else
-    # No Node toolchain: official native installer (user-local, no sudo, no Node).
+    command -v npm >/dev/null 2>&1 \
+      && warn "npm install of Claude Code failed; falling back to the native installer."
+    # Native installer (user-local, no sudo, no Node) -> ~/.local/bin.
     curl -fsSL https://claude.ai/install.sh | bash \
       || warn "Claude Code native install failed; see https://docs.anthropic.com/en/docs/claude-code"
   fi
