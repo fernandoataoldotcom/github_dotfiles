@@ -24,6 +24,9 @@ copied to `~/.dotfiles-backup-<timestamp>/` first.
   (custom functions, e.g. `go-rebase`), `tmux.conf`, `vimrc` (+ vim-plug), `htoprc`,
   and `claude-settings.json` → `~/.claude/settings.json`.
 - Runs `vim +PlugInstall` if `vim` is present.
+- Installs the **Claude Code CLI** (skipped if already present): via `npm` when a
+  Node toolchain exists, otherwise via Anthropic's official native installer
+  (user-local, no Node/sudo). Run `claude` once afterwards to authenticate.
 
 It does **not** install system packages. Install these yourself if missing:
 
@@ -31,8 +34,11 @@ It does **not** install system packages. Install these yourself if missing:
 tmux (>=3.2)  gh  jq  kubectl  vim
 ```
 
-Claude Code: the installer only places `~/.claude/settings.json`. Install the CLI
-separately if you want it.
+Claude Code: the installer places `~/.claude/settings.json` **and** installs the
+`claude` CLI (via `npm`, or the official native installer when Node is absent).
+Authentication isn't automated — run `claude` once after install to sign in. The
+native installer is fetched with `curl ... | bash`; if you'd rather not run a
+remote installer, install the CLI yourself and the script will detect and skip it.
 
 ## Escape hatches / automation
 
