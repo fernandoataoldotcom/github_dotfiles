@@ -11,7 +11,8 @@
 #             `curl ... | zsh` runs it as a script. No HTML tricks needed.
 #
 # Linux/Debian only -- used mostly over SSH / remote VMs / devcontainers.
-# Installs Oh-My-Zsh + zsh plugins + config files (zsh, tmux, vim, htop, claude).
+# Installs Oh-My-Zsh + zsh plugins + config files (zsh, tmux, vim, htop, claude)
+# and the Claude Code CLI (npm if present, else the official native installer).
 # Does NOT install system packages -- install tmux/gh/jq/kubectl/vim yourself
 # (see README). Safe to re-run; backs up anything it would overwrite.
 
@@ -184,6 +185,31 @@ install_vim_plugins() {
   fi
 }
 
+# Install the Claude Code CLI so the box is usable right after this script.
+# Idempotent: skips if already present. Prefers npm (when a Node toolchain exists);
+# otherwise uses Anthropic's official native installer, which needs no Node and
+# installs a user-local binary to ~/.local/bin (no sudo). Never aborts the run.
+install_claude_code() {
+  if command -v claude >/dev/null 2>&1; then
+    log "Claude Code already installed ($(claude --version 2>/dev/null || print -r -- present)); skipping."
+    return 0
+  fi
+  log "Installing Claude Code CLI"
+  if command -v npm >/dev/null 2>&1; then
+    npm install -g @anthropic-ai/claude-code \
+      || warn "npm install of Claude Code failed; try: curl -fsSL https://claude.ai/install.sh | bash"
+  else
+    # No Node toolchain: official native installer (user-local, no sudo, no Node).
+    curl -fsSL https://claude.ai/install.sh | bash \
+      || warn "Claude Code native install failed; see https://docs.anthropic.com/en/docs/claude-code"
+  fi
+  if command -v claude >/dev/null 2>&1; then
+    log "  Claude Code installed. Run 'claude' once to authenticate."
+  else
+    warn "Claude Code not on PATH yet; start a fresh shell (ensure ~/.local/bin is on PATH), then run 'claude' to authenticate."
+  fi
+}
+
 main() {
   os_guard
   select_repo_ref "$@"
@@ -194,10 +220,11 @@ main() {
   install_zsh_plugins
   fetch_configs
   install_vim_plugins
+  install_claude_code
   log "Done. Backups (if any): ${BACKUP_DIR}"
   print -r -- ""
   print -r -- "Next: start a fresh shell ('exec zsh'); reload tmux with 'tmux source-file ~/.tmux.conf'."
   print -r -- "Install deps yourself if missing: tmux(>=3.2) gh jq kubectl vim"
-  print -r -- "Claude Code: settings are at ~/.claude/settings.json. Install the CLI separately if you want it."
+  print -r -- "Claude Code: settings are at ~/.claude/settings.json; run 'claude' once to authenticate."
 }
 main "$@"
