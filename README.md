@@ -7,7 +7,7 @@ devcontainers). One command sets up Oh-My-Zsh, zsh plugins, and my config files
 ## Install
 
 ```sh
-curl setup.decentturing.com | zsh
+curl -fsSL https://setup.decentturing.com | zsh
 ```
 
 An interactive run prompts you to pick a tagged version (use immutable tags for

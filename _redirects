@@ -1,3 +1,3 @@
 # Cloudflare Pages: serve the installer at the site root (200 = rewrite, not redirect)
-# so `curl setup.decentturing.com | zsh` works without a path.
+# so `curl -fsSL https://setup.decentturing.com | zsh` works without a path.
 /    /install    200
