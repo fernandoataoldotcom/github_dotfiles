@@ -190,6 +190,12 @@ install_vim_plugins() {
 # otherwise uses Anthropic's official native installer, which needs no Node and
 # installs a user-local binary to ~/.local/bin (no sudo). Never aborts the run.
 install_claude_code() {
+  # The native installer drops the binary in ~/.local/bin, which our shipped .zshrc
+  # adds to PATH but THIS script's shell usually does not. Put it on PATH up front so
+  # both the "already installed" check and the post-install check see it; otherwise a
+  # successful install gets misreported as a failure.
+  export PATH="${HOME}/.local/bin:${PATH}"
+  hash -r 2>/dev/null || true
   if command -v claude >/dev/null 2>&1; then
     log "Claude Code already installed ($(claude --version 2>/dev/null || print -r -- present)); skipping."
     return 0
@@ -207,8 +213,9 @@ install_claude_code() {
     curl -fsSL https://claude.ai/install.sh | bash \
       || warn "Claude Code native install failed; see https://docs.anthropic.com/en/docs/claude-code"
   fi
+  hash -r 2>/dev/null || true              # forget cached lookups so a fresh binary is found
   if command -v claude >/dev/null 2>&1; then
-    log "  Claude Code installed. Run 'claude' once to authenticate."
+    log "  Claude Code installed ($(claude --version 2>/dev/null || print -r -- present)). Run 'claude' once to authenticate."
   else
     warn "Claude Code not on PATH yet; start a fresh shell (ensure ~/.local/bin is on PATH), then run 'claude' to authenticate."
   fi
