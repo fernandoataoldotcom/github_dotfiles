@@ -15,7 +15,7 @@ and `-f` (fail instead of piping an error page into zsh). Nothing else is needed
 getting shorter than this takes a shorter domain.
 
 An interactive run prompts you to pick a tagged version (use immutable tags for
-reproducible installs), then logs in to GitHub, clones the Claude memory repo and
+reproducible installs), then signs in to Claude and GitHub, clones the Claude memory repo and
 drops you into the new shell. It is safe to re-run — anything it would overwrite is
 copied to `~/.dotfiles-backup-<timestamp>/` first.
 
@@ -32,7 +32,8 @@ copied to `~/.dotfiles-backup-<timestamp>/` first.
 - Installs the **Claude Code CLI** from the `stable` channel via Anthropic's official
   native installer (user-local, no Node/sudo, SHA256-verified). If the image already
   ships `claude`, it is moved to current stable with `claude install stable`. Run `claude` once afterwards to authenticate.
-- With a terminal attached: logs in to **GitHub** (`yolo` if the image has it, else
+- With a terminal attached: signs in to **Claude** (`claude auth login`, done here
+  because the sign-in is unreliable inside tmux), logs in to **GitHub** (`yolo` if the image has it, else
   `gh auth login`), repairs a `null` git `user.name`, and clones the private
   **Claude memory** repo (see below). Then `exec`s the new shell
   (`DOTFILES_NO_EXEC=1` to opt out).
@@ -45,8 +46,8 @@ tmux (>=3.2)  gh  jq  kubectl  vim
 
 ## Claude Code
 
-The installer places `~/.claude/settings.json` **and** installs the `claude` CLI.
-Authentication isn't automated — run `claude` once after install to sign in. The
+The installer places `~/.claude/settings.json`, installs the `claude` CLI and, with
+a terminal attached, runs `claude auth login` (one browser step per VM). The
 native installer is fetched with `curl ... | bash`; if you'd rather not run a
 remote installer, install the CLI yourself and the script will only run `claude install` on it.
 

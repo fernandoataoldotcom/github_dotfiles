@@ -16,8 +16,8 @@
 # Linux/Debian only -- used mostly over SSH / remote VMs / devcontainers.
 # Installs Oh-My-Zsh + zsh plugins + config files (zsh, tmux, vim, htop, claude)
 # and the Claude Code CLI (official native installer, 'stable' channel). With a
-# terminal attached it then logs in to GitHub, clones the private Claude memory
-# repo and drops you into the new shell.
+# terminal attached it then signs in to Claude and GitHub, clones the private Claude
+# memory repo and drops you into the new shell.
 # Does NOT install system packages -- install tmux/gh/jq/kubectl/vim yourself
 # (see README). Safe to re-run; backs up anything it would overwrite.
 
@@ -239,6 +239,25 @@ install_claude_code() {
   fi
 }
 
+# Sign in to Claude here, in the plain terminal the installer runs in. Doing it later
+# inside tmux is unreliable: the sign-in URL to paste a code from is hard to click or
+# copy there, which leaves only the auto-opened browser tab, and that one redirects to
+# localhost on the VM. Never aborts the run.
+claude_login() {
+  command -v claude >/dev/null 2>&1 || return 0
+  if claude auth status 2>/dev/null | grep -q '"loggedIn": *true'; then
+    log "Claude Code already signed in."
+    return 0
+  fi
+  if ! has_tty; then
+    warn "No TTY; skipping Claude sign-in. Run 'claude auth login' outside tmux later."
+    return 0
+  fi
+  log "Signing in to Claude Code (use the URL printed below if the opened tab lands on localhost)"
+  claude auth login </dev/tty || warn "Claude sign-in did not complete; run 'claude auth login' outside tmux."
+  return 0
+}
+
 # Clone the private memory repo that claude-settings.json points Claude Code at
 # (autoMemoryDirectory). Needs an authenticated gh. Never aborts the run: without
 # the clone, memory simply stays local to this VM.
@@ -325,11 +344,12 @@ main() {
   fetch_configs
   install_vim_plugins
   install_claude_code
+  claude_login
   post_auth
   log "Done. Backups (if any): ${BACKUP_DIR}"
   print -r -- ""
   print -r -- "Install deps yourself if missing: tmux(>=3.2) gh jq kubectl vim"
-  print -r -- "Claude Code: settings are at ~/.claude/settings.json; run 'claude' once to authenticate."
+  print -r -- "Claude Code: settings are at ~/.claude/settings.json."
   print -r -- "Reload tmux with 'tmux source-file ~/.tmux.conf'."
   # Hand over to the freshly configured shell (DOTFILES_NO_EXEC=1 to opt out).
   if has_tty && [[ -z "${DOTFILES_NO_EXEC:-}" ]]; then

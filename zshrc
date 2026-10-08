@@ -129,7 +129,7 @@ alias .6='cd ../../../../../../'
 alias ~='cd ~'
 alias mkdir='mkdir -p'
 alias e='exit'
-alias t='tmux'
+alias t='tmux new-session -A -s main'   # attach to 'main' if it exists, else create it
 
 # GIT
 alias gi='git init'
