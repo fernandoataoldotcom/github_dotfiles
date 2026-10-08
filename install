@@ -239,10 +239,11 @@ install_claude_code() {
   fi
 }
 
-# Sign in to Claude here, in the plain terminal the installer runs in. Doing it later
-# inside tmux is unreliable: the sign-in URL to paste a code from is hard to click or
-# copy there, which leaves only the auto-opened browser tab, and that one redirects to
-# localhost on the VM. Never aborts the run.
+# Sign in to Claude as part of the install. Claude's login prints a URL that ends on
+# a page showing a code to paste, and ALSO asks $BROWSER to open a second URL that
+# redirects to localhost on this VM -- which a browser on another machine cannot
+# reach. BROWSER is unset for the login so only the paste-a-code URL is offered.
+# Never aborts the run.
 claude_login() {
   command -v claude >/dev/null 2>&1 || return 0
   if claude auth status 2>/dev/null | grep -q '"loggedIn": *true'; then
@@ -250,11 +251,11 @@ claude_login() {
     return 0
   fi
   if ! has_tty; then
-    warn "No TTY; skipping Claude sign-in. Run 'claude auth login' outside tmux later."
+    warn "No TTY; skipping Claude sign-in. Run 'claude-login' later."
     return 0
   fi
-  log "Signing in to Claude Code (use the URL printed below if the opened tab lands on localhost)"
-  claude auth login </dev/tty || warn "Claude sign-in did not complete; run 'claude auth login' outside tmux."
+  log "Signing in to Claude Code (open the URL printed below, then paste the code it shows)"
+  env -u BROWSER claude auth login </dev/tty || warn "Claude sign-in did not complete; run 'claude-login' later."
   return 0
 }
 

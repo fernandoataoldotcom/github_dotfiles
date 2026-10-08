@@ -131,6 +131,11 @@ alias mkdir='mkdir -p'
 alias e='exit'
 alias t='tmux new-session -A -s main'   # attach to 'main' if it exists, else create it
 
+# CLAUDE
+# Sign in without the auto-opened browser tab: on a remote VM that tab redirects to
+# localhost. Without BROWSER only the paste-a-code URL is offered (works in tmux too).
+alias claude-login='env -u BROWSER claude auth login'
+
 # GIT
 alias gi='git init'
 alias gs='git status'

@@ -32,8 +32,9 @@ copied to `~/.dotfiles-backup-<timestamp>/` first.
 - Installs the **Claude Code CLI** from the `stable` channel via Anthropic's official
   native installer (user-local, no Node/sudo, SHA256-verified). If the image already
   ships `claude`, it is moved to current stable with `claude install stable`. Run `claude` once afterwards to authenticate.
-- With a terminal attached: signs in to **Claude** (`claude auth login`, done here
-  because the sign-in is unreliable inside tmux), logs in to **GitHub** (`yolo` if the image has it, else
+- With a terminal attached: signs in to **Claude** (`claude auth login` with
+  `BROWSER` unset, so you get the paste-a-code URL instead of a tab that redirects
+  to localhost on the VM; `claude-login` does the same later), logs in to **GitHub** (`yolo` if the image has it, else
   `gh auth login`), repairs a `null` git `user.name`, and clones the private
   **Claude memory** repo (see below). Then `exec`s the new shell
   (`DOTFILES_NO_EXEC=1` to opt out).
