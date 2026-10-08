@@ -233,7 +233,7 @@ install_claude_code() {
     || warn "Claude Code native install failed; see https://docs.anthropic.com/en/docs/claude-code"
   hash -r 2>/dev/null || true              # forget cached lookups so a fresh binary is found
   if command -v claude >/dev/null 2>&1; then
-    log "  Claude Code installed ($(claude --version 2>/dev/null || print -r -- present)). Run 'claude' once to authenticate."
+    log "  Claude Code installed ($(claude --version 2>/dev/null || print -r -- present))."
   else
     warn "Claude Code not on PATH yet; start a fresh shell (ensure ~/.local/bin is on PATH), then run 'claude' to authenticate."
   fi
