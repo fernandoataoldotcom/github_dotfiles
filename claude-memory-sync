@@ -4,14 +4,21 @@
 #
 # Keeps Claude Code's memory (a PRIVATE git repo cloned at ~/.claude-memory, see
 # `autoMemoryDirectory` in ~/.claude/settings.json) in sync across throwaway VMs.
-# Wired to Claude Code hooks: SessionStart -> pull, Stop/SessionEnd -> push-async.
+# Wired to Claude Code hooks: SessionStart -> start, Stop/SessionEnd -> push-async.
 #
+# The same repo also holds private per-project notes (projects/<owner>/<repo>.md):
+# what a CLAUDE.md would say, for repos whose owners do not want one committed.
+# `start` prints them, and Claude Code adds a SessionStart hook's stdout to the
+# session's context, so nothing is ever written into the project repo.
+#
+#   claude-memory-sync start        pull, then print the notes for the repo in $PWD
+#   claude-memory-sync notes        print the notes for the repo in $PWD
 #   claude-memory-sync pull         commit local changes, then rebase onto the remote
 #   claude-memory-sync push         commit local changes, rebase, push
 #   claude-memory-sync push-async   same as push, detached (hooks must return fast)
 #
-# Never fails and prints nothing on stdout: a sync problem must not block a session,
-# and hook stdout would end up in Claude's context.
+# Never fails, and only `start`/`notes` print on stdout: a sync problem must not
+# block a session, and hook stdout ends up in Claude's context.
 
 DIR="${CLAUDE_MEMORY_DIR:-$HOME/.claude-memory}"
 LOCK="${DIR}/.git/claude-memory-sync.lock"
@@ -52,16 +59,37 @@ push() {
   g push --quiet -u origin HEAD 2>/dev/null || warn "push failed; will retry on the next sync."
 }
 
+# Notes for the git repo containing $PWD, keyed by its origin (<owner>/<repo>).
+notes() {
+  local url; url="$(git remote get-url origin 2>/dev/null)" || return 0
+  url="${url%.git}"
+  local -a parts=("${(@s:/:)${url//://}}")
+  (( ${#parts} >= 2 )) || return 0
+  local key="${parts[-2]//[^A-Za-z0-9._-]/_}/${parts[-1]//[^A-Za-z0-9._-]/_}"
+  local f="${DIR}/projects/${key}.md"
+  if [[ -s "$f" ]]; then
+    print -r -- "Private project notes for ${key} (treat like a CLAUDE.md for this repo). They live in ${f}, outside the project repo and synced across VMs: edit that file to change them, and never add a CLAUDE.md to the project itself unless asked."
+    print -r -- ""
+    cat "$f"
+  else
+    print -r -- "No private project notes for ${key} yet. Durable, project-specific instructions (build/test commands, conventions) belong in ${f}, which is outside the project repo and synced across VMs; do not add a CLAUDE.md to the project itself unless asked."
+  fi
+}
+
+# One sync at a time; a lock left by a crashed run is cleared after 5 minutes.
+locked() {
+  [[ -n "$(find "$LOCK" -maxdepth 0 -mmin +5 2>/dev/null)" ]] && rmdir "$LOCK" 2>/dev/null
+  mkdir "$LOCK" 2>/dev/null || return 0
+  "$@"
+  rmdir "$LOCK" 2>/dev/null
+}
+
 [[ -d "${DIR}/.git" ]] || exit 0
 
 case "${1:-}" in
-  (pull|push)
-    # One sync at a time; a lock left by a crashed run is cleared after 5 minutes.
-    [[ -n "$(find "$LOCK" -maxdepth 0 -mmin +5 2>/dev/null)" ]] && rmdir "$LOCK" 2>/dev/null
-    mkdir "$LOCK" 2>/dev/null || exit 0
-    trap 'rmdir "$LOCK" 2>/dev/null' EXIT
-    "$1"
-    ;;
+  (pull|push) locked "$1" ;;
+  (start)     locked pull; notes ;;
+  (notes)     notes ;;
   (push-async)
     if command -v setsid >/dev/null 2>&1; then
       setsid "${0:A}" push </dev/null >/dev/null 2>&1 &!
@@ -70,7 +98,7 @@ case "${1:-}" in
     fi
     ;;
   (*)
-    warn "usage: claude-memory-sync pull|push|push-async"
+    warn "usage: claude-memory-sync start|notes|pull|push|push-async"
     ;;
 esac
 exit 0

@@ -14,7 +14,7 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "\"$HOME/.local/bin/claude-memory-sync\" pull" }
+          { "type": "command", "command": "\"$HOME/.local/bin/claude-memory-sync\" start" }
         ]
       }
     ],

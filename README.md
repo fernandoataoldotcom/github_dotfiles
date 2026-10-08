@@ -68,6 +68,12 @@ after each turn and at session end. Create the repo once:
 gh repo create fernandoataoldotcom/claude-memory --private
 ```
 
+**Project notes without a `CLAUDE.md`.** For repos whose owners don't want one
+committed, put what it would say in `~/.claude-memory/projects/<owner>/<repo>.md`.
+The session-start hook prints that file into Claude's context when you start
+`claude` inside a clone of that repo, so nothing is written to the project. Ask
+Claude to "update the project notes" instead of running `/init`.
+
 Keep it private: memories can hold project details and are read back into every
 session. If the clone is missing, sync is a no-op and memory stays VM-local.
 
