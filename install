@@ -206,8 +206,9 @@ install_vim_plugins() {
 }
 
 # Install the Claude Code CLI so the box is usable right after this script.
-# Idempotent: skips if already present (auto-update then follows the channel set in
-# claude-settings.json). Uses Anthropic's official native installer, which needs no
+# If already present (e.g. baked into the image) it is moved to CLAUDE_CHANNEL with
+# `claude install`; auto-update then follows the channel set in claude-settings.json.
+# Uses Anthropic's official native installer, which needs no
 # Node, verifies the binary against the release manifest's SHA256 and installs
 # user-local to ~/.local/bin (no sudo). Never aborts the run.
 install_claude_code() {
@@ -218,7 +219,13 @@ install_claude_code() {
   export PATH="${HOME}/.local/bin:${PATH}"
   hash -r 2>/dev/null || true
   if command -v claude >/dev/null 2>&1; then
-    log "Claude Code already installed ($(claude --version 2>/dev/null || print -r -- present)); skipping."
+    # Usually baked into the base image at whatever was current when the image was
+    # built. Move it to the channel now instead of waiting for the background updater.
+    log "Claude Code already installed ($(claude --version 2>/dev/null || print -r -- present)); moving to channel: ${CLAUDE_CHANNEL}"
+    claude install "$CLAUDE_CHANNEL" </dev/null \
+      || warn "claude install ${CLAUDE_CHANNEL} failed; keeping the installed version."
+    hash -r 2>/dev/null || true
+    log "  Claude Code now at $(claude --version 2>/dev/null || print -r -- unknown)"
     return 0
   fi
   log "Installing Claude Code CLI (channel: ${CLAUDE_CHANNEL})"

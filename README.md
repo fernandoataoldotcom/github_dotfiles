@@ -29,9 +29,9 @@ copied to `~/.dotfiles-backup-<timestamp>/` first.
   (custom functions, e.g. `go-rebase`), `tmux.conf`, `vimrc` (+ vim-plug), `htoprc`,
   and `claude-settings.json` → `~/.claude/settings.json`.
 - Runs `vim +PlugInstall` if `vim` is present.
-- Installs the **Claude Code CLI** (skipped if already present) from the `stable`
-  channel via Anthropic's official native installer (user-local, no Node/sudo,
-  SHA256-verified). Run `claude` once afterwards to authenticate.
+- Installs the **Claude Code CLI** from the `stable` channel via Anthropic's official
+  native installer (user-local, no Node/sudo, SHA256-verified). If the image already
+  ships `claude`, it is moved to current stable with `claude install stable`. Run `claude` once afterwards to authenticate.
 - With a terminal attached: logs in to **GitHub** (`yolo` if the image has it, else
   `gh auth login`), repairs a `null` git `user.name`, and clones the private
   **Claude memory** repo (see below). Then `exec`s the new shell
@@ -48,9 +48,10 @@ tmux (>=3.2)  gh  jq  kubectl  vim
 The installer places `~/.claude/settings.json` **and** installs the `claude` CLI.
 Authentication isn't automated — run `claude` once after install to sign in. The
 native installer is fetched with `curl ... | bash`; if you'd rather not run a
-remote installer, install the CLI yourself and the script will detect and skip it.
+remote installer, install the CLI yourself and the script will only run `claude install` on it.
 
-**Updates.** New installs use the `stable` channel, and `autoUpdatesChannel: stable`
+**Updates.** Every installer run puts Claude on the `stable` channel (fresh install,
+or `claude install stable` over a version baked into the image), and `autoUpdatesChannel: stable`
 in the settings keeps auto-update on it (about a week behind `latest`, skipping
 releases with regressions). For a one-off, `CLAUDE_CHANNEL=latest` or
 `CLAUDE_CHANNEL=2.1.294` picks another channel or an exact version at install time.
