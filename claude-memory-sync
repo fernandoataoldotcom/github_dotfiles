@@ -1,0 +1,76 @@
+#!/usr/bin/env zsh
+#
+# claude-memory-sync | https://github.com/fernandoataoldotcom/github_dotfiles
+#
+# Keeps Claude Code's memory (a PRIVATE git repo cloned at ~/.claude-memory, see
+# `autoMemoryDirectory` in ~/.claude/settings.json) in sync across throwaway VMs.
+# Wired to Claude Code hooks: SessionStart -> pull, Stop/SessionEnd -> push-async.
+#
+#   claude-memory-sync pull         commit local changes, then rebase onto the remote
+#   claude-memory-sync push         commit local changes, rebase, push
+#   claude-memory-sync push-async   same as push, detached (hooks must return fast)
+#
+# Never fails and prints nothing on stdout: a sync problem must not block a session,
+# and hook stdout would end up in Claude's context.
+
+DIR="${CLAUDE_MEMORY_DIR:-$HOME/.claude-memory}"
+LOCK="${DIR}/.git/claude-memory-sync.lock"
+
+warn() { print -r -- "claude-memory-sync: $*" >&2; }
+g()    { GIT_TERMINAL_PROMPT=0 timeout 20 git -C "$DIR" "$@"; }
+
+commit_local() {
+  g add -A >/dev/null 2>&1
+  g diff --cached --quiet >/dev/null 2>&1 && return 0
+  local -a ident=()
+  # Fresh VMs may not have a git identity yet; never let that drop a memory.
+  [[ -n "$(git config user.email 2>/dev/null)" ]] \
+    || ident=(-c user.name=claude-memory-sync -c user.email=claude-memory-sync@localhost)
+  g "${ident[@]}" commit --quiet -m "memory: ${HOST:-unknown} $(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>/dev/null \
+    || warn "commit failed; changes stay in the working tree."
+}
+
+rebase_on_remote() {
+  g pull --rebase --autostash --quiet 2>/dev/null && return 0
+  g rebase --abort 2>/dev/null
+  return 1
+}
+
+pull() {
+  commit_local
+  rebase_on_remote || warn "pull failed (offline, empty remote or conflict); using the local copy."
+}
+
+push() {
+  commit_local
+  g rev-parse --verify -q HEAD >/dev/null 2>&1 || return 0        # nothing committed yet
+  # Cheap exit for the common case (runs after every turn): nothing new to send.
+  if g rev-parse --verify -q '@{u}' >/dev/null 2>&1; then
+    [[ -z "$(g rev-list '@{u}..HEAD' 2>/dev/null)" ]] && return 0
+    rebase_on_remote || { warn "rebase onto remote failed; keeping the local commit for next time."; return 0; }
+  fi
+  g push --quiet -u origin HEAD 2>/dev/null || warn "push failed; will retry on the next sync."
+}
+
+[[ -d "${DIR}/.git" ]] || exit 0
+
+case "${1:-}" in
+  (pull|push)
+    # One sync at a time; a lock left by a crashed run is cleared after 5 minutes.
+    [[ -n "$(find "$LOCK" -maxdepth 0 -mmin +5 2>/dev/null)" ]] && rmdir "$LOCK" 2>/dev/null
+    mkdir "$LOCK" 2>/dev/null || exit 0
+    trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+    "$1"
+    ;;
+  (push-async)
+    if command -v setsid >/dev/null 2>&1; then
+      setsid "${0:A}" push </dev/null >/dev/null 2>&1 &!
+    else
+      "${0:A}" push </dev/null >/dev/null 2>&1 &!
+    fi
+    ;;
+  (*)
+    warn "usage: claude-memory-sync pull|push|push-async"
+    ;;
+esac
+exit 0

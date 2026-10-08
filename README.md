@@ -7,11 +7,16 @@ devcontainers). One command sets up Oh-My-Zsh, zsh plugins, and my config files
 ## Install
 
 ```sh
-curl -fsSL https://setup.decentturing.com | zsh
+curl -f https://setup.decentturing.com|zsh
 ```
 
+Keep `https://` (plain http only redirects, and that first hop is unauthenticated)
+and `-f` (fail instead of piping an error page into zsh). Nothing else is needed;
+getting shorter than this takes a shorter domain.
+
 An interactive run prompts you to pick a tagged version (use immutable tags for
-reproducible installs). It is safe to re-run — anything it would overwrite is
+reproducible installs), then logs in to GitHub, clones the Claude memory repo and
+drops you into the new shell. It is safe to re-run — anything it would overwrite is
 copied to `~/.dotfiles-backup-<timestamp>/` first.
 
 ## What it does
@@ -24,9 +29,13 @@ copied to `~/.dotfiles-backup-<timestamp>/` first.
   (custom functions, e.g. `go-rebase`), `tmux.conf`, `vimrc` (+ vim-plug), `htoprc`,
   and `claude-settings.json` → `~/.claude/settings.json`.
 - Runs `vim +PlugInstall` if `vim` is present.
-- Installs the **Claude Code CLI** (skipped if already present): via `npm` when a
-  Node toolchain exists, otherwise via Anthropic's official native installer
-  (user-local, no Node/sudo). Run `claude` once afterwards to authenticate.
+- Installs the **Claude Code CLI** (skipped if already present) from the `stable`
+  channel via Anthropic's official native installer (user-local, no Node/sudo,
+  SHA256-verified). Run `claude` once afterwards to authenticate.
+- With a terminal attached: logs in to **GitHub** (`yolo` if the image has it, else
+  `gh auth login`), repairs a `null` git `user.name`, and clones the private
+  **Claude memory** repo (see below). Then `exec`s the new shell
+  (`DOTFILES_NO_EXEC=1` to opt out).
 
 It does **not** install system packages. Install these yourself if missing:
 
@@ -34,17 +43,37 @@ It does **not** install system packages. Install these yourself if missing:
 tmux (>=3.2)  gh  jq  kubectl  vim
 ```
 
-Claude Code: the installer places `~/.claude/settings.json` **and** installs the
-`claude` CLI (via `npm`, or the official native installer when Node is absent).
+## Claude Code
+
+The installer places `~/.claude/settings.json` **and** installs the `claude` CLI.
 Authentication isn't automated — run `claude` once after install to sign in. The
 native installer is fetched with `curl ... | bash`; if you'd rather not run a
 remote installer, install the CLI yourself and the script will detect and skip it.
+
+**Updates.** New installs use the `stable` channel, and `autoUpdatesChannel: stable`
+in the settings keeps auto-update on it (about a week behind `latest`, skipping
+releases with regressions). For a one-off, `CLAUDE_CHANNEL=latest` or
+`CLAUDE_CHANNEL=2.1.294` picks another channel or an exact version at install time.
+
+**Memory that survives the VM.** `autoMemoryDirectory` points Claude at
+`~/.claude-memory/memory`, a clone of a **private** repo (`MEMORY_REPO`, default
+`fernandoataoldotcom/claude-memory`) shared by every VM. Hooks run
+[`claude-memory-sync`](claude-memory-sync): pull at session start, commit + push
+after each turn and at session end. Create the repo once:
+
+```sh
+gh repo create fernandoataoldotcom/claude-memory --private
+```
+
+Keep it private: memories can hold project details and are read back into every
+session. If the clone is missing, sync is a no-op and memory stays VM-local.
 
 ## Escape hatches / automation
 
 - `REPO_RAW=<url>` — explicit config source (overrides everything; e.g. `file:///repo` for tests).
 - `DOTFILES_REF=<tag>` or `zsh -s -- <tag>` — pick a ref non-interactively (no TTY).
 - `DOTFILES_RESOLVE_ONLY=1` — dry run: print the resolved `REPO_RAW` and exit.
+- `CLAUDE_CHANNEL=<stable|latest|X.Y.Z>`, `MEMORY_REPO=<owner/repo>`, `DOTFILES_NO_EXEC=1` — see above.
 
 ## Hosting (Cloudflare Pages)
 

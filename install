@@ -3,16 +3,21 @@
 # dotfiles installer | https://github.com/fernandoataoldotcom/github_dotfiles
 # Served at https://setup.decentturing.com   (Cloudflare Pages, served as text/plain)
 #
-#   Install:  curl -fsSL https://setup.decentturing.com | zsh
-#             (https:// + -L matter: the domain 301-redirects http -> https, and
-#             -f makes curl fail instead of piping an error page into zsh.)
+#   Install:  curl -f https://setup.decentturing.com|zsh
+#             (https:// matters: plain http only 301-redirects here, and that first
+#             hop is unauthenticated. -f makes curl fail instead of piping an error
+#             page into zsh. Nothing else is needed: the https root answers 200
+#             directly, and this script only runs once main() on its LAST line has
+#             been read, so a truncated download cannot half-run.)
 #   Read it:  open the URL in a browser. Cloudflare Pages serves this file as
 #             text/plain, so the browser shows it as raw monospace text and
 #             `curl ... | zsh` runs it as a script. No HTML tricks needed.
 #
 # Linux/Debian only -- used mostly over SSH / remote VMs / devcontainers.
 # Installs Oh-My-Zsh + zsh plugins + config files (zsh, tmux, vim, htop, claude)
-# and the Claude Code CLI (npm if present, else the official native installer).
+# and the Claude Code CLI (official native installer, 'stable' channel). With a
+# terminal attached it then logs in to GitHub, clones the private Claude memory
+# repo and drops you into the new shell.
 # Does NOT install system packages -- install tmux/gh/jq/kubectl/vim yourself
 # (see README). Safe to re-run; backs up anything it would overwrite.
 
@@ -37,12 +42,26 @@ ZSH_SYNTAX_HIGHLIGHTING_REF="0.8.0";  ZSH_SYNTAX_HIGHLIGHTING_SHA="db085e4661f6a
 ZSH_AUTOSUGGESTIONS_REF="v0.7.1";     ZSH_AUTOSUGGESTIONS_SHA="e52ee8ca55bcc56a17c828767a3f98f22a68d4eb"
 YOU_SHOULD_USE_REF="1.11.1";          YOU_SHOULD_USE_SHA="ff371d6a11b653e1fa8dda4e61c896c78de26bfa"
 
+# Claude Code release channel for a fresh install: stable | latest | X.Y.Z.
+# 'stable' trails 'latest' by about a week and skips releases with regressions;
+# claude-settings.json keeps auto-updates on the same channel afterwards.
+CLAUDE_CHANNEL="${CLAUDE_CHANNEL:-stable}"
+
+# PRIVATE repo holding Claude Code's memory, cloned to ~/.claude-memory so it
+# survives throwaway VMs (see claude-memory-sync). Never make this repo public.
+MEMORY_REPO="${MEMORY_REPO:-fernandoataoldotcom/claude-memory}"
+MEMORY_DIR="${HOME}/.claude-memory"
+
 TS="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="${HOME}/.dotfiles-backup-${TS}"
 
 log()  { print -r -- "==> $*"; }
 warn() { print -r -- "WARN: $*" >&2; }
 die()  { print -r -- "ERROR: $*" >&2; exit 1; }
+
+# A real controlling terminal? Test by *opening* /dev/tty -- `[[ -r /dev/tty ]]`
+# only checks the device's permission bits (always rw), not whether a tty exists.
+has_tty() { { true </dev/tty; } 2>/dev/null; }
 
 os_guard() {
   [[ "$(uname -s)" == "Linux" ]] || die "Linux (Debian/Ubuntu) only. Detected $(uname -s). Aborting."
@@ -102,9 +121,7 @@ select_repo_ref() {
     log "Using REPO_RAW override: ${REPO_RAW}"; return 0
   fi
   local ref=""
-  # A real controlling terminal? Test by *opening* /dev/tty -- `[[ -r /dev/tty ]]`
-  # only checks the device's permission bits (always rw), not whether a tty exists.
-  if { true </dev/tty; } 2>/dev/null; then
+  if has_tty; then
     ref="$(pick_tag)"                            # interactive: always ask the human
   else
     ref="${DOTFILES_REF:-${1:-}}"                # no TTY (CI/automation): env / positional
@@ -127,6 +144,7 @@ backup_one() {                     # copy (not move) existing target into timest
 backup_existing() {
   log "Backing up any existing files to ${BACKUP_DIR}"
   for f in ~/.tmux.conf ~/.vimrc ~/.config/htop/htoprc ~/.zshrc ~/.claude/settings.json \
+           ~/.local/bin/claude-memory-sync \
            ~/.oh-my-zsh/custom/fernandoataoldotcom-functions.zsh; do
     backup_one "$f"
   done
@@ -154,6 +172,8 @@ fetch_configs() {
   fetch "${REPO_RAW}/htoprc"              ~/.config/htop/htoprc
   fetch "${REPO_RAW}/vimrc"               ~/.vimrc
   fetch "${REPO_RAW}/claude-settings.json" ~/.claude/settings.json
+  fetch "${REPO_RAW}/claude-memory-sync"  ~/.local/bin/claude-memory-sync
+  chmod +x ~/.local/bin/claude-memory-sync
   fetch "https://raw.githubusercontent.com/junegunn/vim-plug/${VIM_PLUG_REF}/plug.vim" ~/.vim/autoload/plug.vim
 }
 
@@ -186,9 +206,10 @@ install_vim_plugins() {
 }
 
 # Install the Claude Code CLI so the box is usable right after this script.
-# Idempotent: skips if already present. Prefers npm (when a Node toolchain exists);
-# otherwise uses Anthropic's official native installer, which needs no Node and
-# installs a user-local binary to ~/.local/bin (no sudo). Never aborts the run.
+# Idempotent: skips if already present (auto-update then follows the channel set in
+# claude-settings.json). Uses Anthropic's official native installer, which needs no
+# Node, verifies the binary against the release manifest's SHA256 and installs
+# user-local to ~/.local/bin (no sudo). Never aborts the run.
 install_claude_code() {
   # The native installer drops the binary in ~/.local/bin, which our shipped .zshrc
   # adds to PATH but THIS script's shell usually does not. Put it on PATH up front so
@@ -200,25 +221,90 @@ install_claude_code() {
     log "Claude Code already installed ($(claude --version 2>/dev/null || print -r -- present)); skipping."
     return 0
   fi
-  log "Installing Claude Code CLI"
-  # Prefer npm when a Node toolchain exists, but FALL BACK to the native installer
-  # if the npm global install fails (e.g. an unwritable prefix / no sudo in a
-  # devcontainer) -- otherwise a failed `npm -g` would leave the box without claude.
-  if command -v npm >/dev/null 2>&1 && npm install -g @anthropic-ai/claude-code; then
-    : # installed via npm
-  else
-    command -v npm >/dev/null 2>&1 \
-      && warn "npm install of Claude Code failed; falling back to the native installer."
-    # Native installer (user-local, no sudo, no Node) -> ~/.local/bin.
-    curl -fsSL https://claude.ai/install.sh | bash \
-      || warn "Claude Code native install failed; see https://docs.anthropic.com/en/docs/claude-code"
-  fi
+  log "Installing Claude Code CLI (channel: ${CLAUDE_CHANNEL})"
+  curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CHANNEL" \
+    || warn "Claude Code native install failed; see https://docs.anthropic.com/en/docs/claude-code"
   hash -r 2>/dev/null || true              # forget cached lookups so a fresh binary is found
   if command -v claude >/dev/null 2>&1; then
     log "  Claude Code installed ($(claude --version 2>/dev/null || print -r -- present)). Run 'claude' once to authenticate."
   else
     warn "Claude Code not on PATH yet; start a fresh shell (ensure ~/.local/bin is on PATH), then run 'claude' to authenticate."
   fi
+}
+
+# Clone the private memory repo that claude-settings.json points Claude Code at
+# (autoMemoryDirectory). Needs an authenticated gh. Never aborts the run: without
+# the clone, memory simply stays local to this VM.
+setup_memory() {
+  if [[ -d "${MEMORY_DIR}/.git" ]]; then
+    log "Claude memory repo already present at ${MEMORY_DIR}"
+  else
+    # Claude may already have written VM-local memories here; keep them.
+    local aside=""
+    if [[ -e "$MEMORY_DIR" ]]; then aside="${MEMORY_DIR}.local-${TS}"; mv "$MEMORY_DIR" "$aside"; fi
+    log "Cloning Claude memory repo ${MEMORY_REPO} -> ${MEMORY_DIR}"
+    if ! gh repo clone "$MEMORY_REPO" "$MEMORY_DIR" -- --quiet 2>/dev/null; then
+      rm -rf "$MEMORY_DIR"
+      if [[ -n "$aside" ]]; then mv "$aside" "$MEMORY_DIR"; fi
+      warn "Could not clone ${MEMORY_REPO}; Claude memory stays local to this VM."
+      warn "Create it once with: gh repo create ${MEMORY_REPO} --private   (then re-run this installer)"
+      return 0
+    fi
+    if [[ -n "$aside" && -d "${aside}/memory" ]]; then
+      mkdir -p "${MEMORY_DIR}/memory"
+      cp -an "${aside}/memory/." "${MEMORY_DIR}/memory/" || true
+      log "  merged VM-local memories from ${aside}"
+    fi
+  fi
+  mkdir -p "${MEMORY_DIR}/memory"
+  # MEMORY.md is an append-mostly index every VM touches: union-merge it so two
+  # VMs adding lines at once do not conflict.
+  if [[ ! -f "${MEMORY_DIR}/.gitattributes" ]]; then
+    print -r -- "MEMORY.md merge=union" > "${MEMORY_DIR}/.gitattributes"
+  fi
+  local vis; vis="$(gh repo view "$MEMORY_REPO" --json visibility --jq .visibility 2>/dev/null || true)"
+  if [[ -n "$vis" && "$vis" != PRIVATE ]]; then
+    warn "${MEMORY_REPO} is ${vis}, not PRIVATE -- memories can hold project details. Fix: gh repo edit ${MEMORY_REPO} --visibility private"
+  fi
+  return 0
+}
+
+# GitHub login + everything that depends on it, so one command sets up the box.
+# Uses the base image's `yolo` helper when present (browser device flow), else a
+# plain `gh auth login`. Never aborts the run.
+post_auth() {
+  if ! command -v gh >/dev/null 2>&1; then
+    warn "gh not found; skipping GitHub login and Claude memory setup."
+    return 0
+  fi
+  if ! gh auth status >/dev/null 2>&1; then
+    if ! has_tty; then
+      warn "No TTY; skipping GitHub login. Log in later ('yolo' or 'gh auth login') and re-run for Claude memory sync."
+      return 0
+    fi
+    log "Logging in to GitHub"
+    if command -v yolo >/dev/null 2>&1; then
+      yolo </dev/tty || warn "yolo returned non-zero."
+    else
+      { gh auth login -h github.com -p https -w </dev/tty && gh auth setup-git; } \
+        || warn "gh auth login failed."
+    fi
+  fi
+  if ! gh auth status >/dev/null 2>&1; then
+    warn "Not logged in to GitHub; skipping Claude memory setup."
+    return 0
+  fi
+  # A GitHub profile without a display name makes `gh api user | jq .name` yield
+  # the literal string "null"; fall back to the login.
+  local name; name="$(git config --global user.name 2>/dev/null || true)"
+  if [[ -z "$name" || "$name" == null ]]; then
+    name="$(gh api user --jq '.name // .login' 2>/dev/null || true)"
+    if [[ -n "$name" && "$name" != null ]]; then
+      git config --global user.name "$name"
+      log "  git user.name set to '${name}'"
+    fi
+  fi
+  setup_memory
 }
 
 main() {
@@ -232,10 +318,16 @@ main() {
   fetch_configs
   install_vim_plugins
   install_claude_code
+  post_auth
   log "Done. Backups (if any): ${BACKUP_DIR}"
   print -r -- ""
-  print -r -- "Next: start a fresh shell ('exec zsh'); reload tmux with 'tmux source-file ~/.tmux.conf'."
   print -r -- "Install deps yourself if missing: tmux(>=3.2) gh jq kubectl vim"
   print -r -- "Claude Code: settings are at ~/.claude/settings.json; run 'claude' once to authenticate."
+  print -r -- "Reload tmux with 'tmux source-file ~/.tmux.conf'."
+  # Hand over to the freshly configured shell (DOTFILES_NO_EXEC=1 to opt out).
+  if has_tty && [[ -z "${DOTFILES_NO_EXEC:-}" ]]; then
+    exec zsh -l </dev/tty
+  fi
+  print -r -- "Next: start a fresh shell ('exec zsh')."
 }
 main "$@"

@@ -114,7 +114,12 @@ source $ZSH/oh-my-zsh.sh
 #==============#
 
 # TERMINAL
-cd() {builtin cd "$@"; ls -lah; }
+# List after cd, but only for a human: inside Claude Code's shell (CLAUDECODE=1)
+# or a script the listing is just noise.
+cd() {
+  builtin cd "$@" || return
+  if [[ -o interactive && -z "$CLAUDECODE" ]]; then ls -lah; fi
+}
 alias ..='cd ../'
 alias ...='cd ../../'
 alias .3='cd ../../../'
@@ -135,7 +140,7 @@ alias gl='git pull'
 alias gpt='git push --tag'
 
 # CODESPACES
-GITHUB_TOKEN=$GH_PAT
+[[ -n "$GH_PAT" ]] && export GITHUB_TOKEN="$GH_PAT"
 alias ghrc='gh repo clone'
 
 # TERRAFORM
