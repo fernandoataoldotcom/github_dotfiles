@@ -24,7 +24,7 @@ jobs:
       matrix:
         debian: [bookworm, trixie]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run installer integration test in Debian ${{ matrix.debian }}
         run: |
