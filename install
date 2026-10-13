@@ -172,8 +172,12 @@ fetch_configs() {
   fetch "${REPO_RAW}/htoprc"              ~/.config/htop/htoprc
   fetch "${REPO_RAW}/vimrc"               ~/.vimrc
   fetch "${REPO_RAW}/claude-settings.json" ~/.claude/settings.json
-  fetch "${REPO_RAW}/claude-memory-sync"  ~/.local/bin/claude-memory-sync
-  chmod +x ~/.local/bin/claude-memory-sync
+  # Tags before v0.2.0 do not have this file; picking one must not abort the install.
+  if fetch "${REPO_RAW}/claude-memory-sync" ~/.local/bin/claude-memory-sync; then
+    chmod +x ~/.local/bin/claude-memory-sync
+  else
+    warn "claude-memory-sync is not in this ref; Claude memory sync is unavailable with it."
+  fi
   fetch "https://raw.githubusercontent.com/junegunn/vim-plug/${VIM_PLUG_REF}/plug.vim" ~/.vim/autoload/plug.vim
 }
 
