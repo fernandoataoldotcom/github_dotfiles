@@ -356,9 +356,13 @@ main() {
   print -r -- "Install deps yourself if missing: tmux(>=3.2) gh jq kubectl vim"
   print -r -- "Claude Code: settings are at ~/.claude/settings.json."
   print -r -- "Reload tmux with 'tmux source-file ~/.tmux.conf'."
-  # Hand over to the freshly configured shell (DOTFILES_NO_EXEC=1 to opt out).
-  if has_tty && [[ -z "${DOTFILES_NO_EXEC:-}" ]]; then
-    exec zsh -l </dev/tty
+  # Hand over to the freshly configured shell (DOTFILES_NO_EXEC=1 to opt out). This
+  # shell runs inside the one that launched the installer; `exit` returns to it.
+  # stdin must be the real terminal device, taken from stdout: with `curl ...|zsh`
+  # stdin is the pipe, and a shell whose stdin is the /dev/tty alias breaks tmux
+  # ("open terminal failed: can't use /dev/tty").
+  if [[ -t 1 && -z "${DOTFILES_NO_EXEC:-}" ]]; then
+    exec zsh -l <&1
   fi
   print -r -- "Next: start a fresh shell ('exec zsh')."
 }
