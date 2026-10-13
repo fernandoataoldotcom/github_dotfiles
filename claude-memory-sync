@@ -78,7 +78,7 @@ notes() {
   else
     dirs=(*/.git(N:h)); dirs=("${(@)dirs[1,12]}")
   fi
-  local d key f; local -a have=() missing=()
+  local d key; local -aU have=() missing=()   # -U: two clones of one repo share notes
   for d in "${dirs[@]}"; do
     [[ -n "$d" ]] || continue
     key="$(repo_key "$d")"; [[ -n "$key" ]] || continue
