@@ -12,7 +12,7 @@
 # session's context, so nothing is ever written into the project repo.
 #
 #   claude-memory-sync start        pull, then print the notes for the repo in $PWD
-#                                   (or for each repo directly inside $PWD)
+#                                   (or for each repo up to two levels inside $PWD)
 #   claude-memory-sync notes        print the notes only
 #   claude-memory-sync pull         commit local changes, then rebase onto the remote
 #   claude-memory-sync push         commit local changes, rebase, push
@@ -61,22 +61,25 @@ push() {
 }
 
 # <owner>/<repo> for the git repo at $1, from its origin; empty if it has none.
+# Lowercased: GitHub names are case-insensitive, and origins spell them both ways.
 repo_key() {
   local url; url="$(git -C "$1" remote get-url origin 2>/dev/null)" || return 0
   url="${url%.git}"
   local -a parts=("${(@s:/:)${url//://}}")
   (( ${#parts} >= 2 )) || return 0
-  print -r -- "${parts[-2]//[^A-Za-z0-9._-]/_}/${parts[-1]//[^A-Za-z0-9._-]/_}"
+  local key="${parts[-2]//[^A-Za-z0-9._-]/_}/${parts[-1]//[^A-Za-z0-9._-]/_}"
+  print -r -- "${(L)key}"
 }
 
 # Notes for the git repo containing $PWD. When $PWD is not in a repo (a workspace
-# folder holding several clones), notes for each repo directly inside it.
+# folder holding several clones), notes for each repo one or two levels inside it
+# (clones are often grouped by owner: <owner>/<repo>).
 notes() {
   local -a dirs=()
   if git rev-parse --show-toplevel >/dev/null 2>&1; then
     dirs=("$(git rev-parse --show-toplevel)")
   else
-    dirs=(*/.git(N:h)); dirs=("${(@)dirs[1,12]}")
+    dirs=(*/.git(N:h) */*/.git(N:h)); dirs=("${(@)dirs[1,24]}")
   fi
   local d key; local -aU have=() missing=()   # -U: two clones of one repo share notes
   for d in "${dirs[@]}"; do
@@ -85,7 +88,7 @@ notes() {
     if [[ -s "${DIR}/projects/${key}.md" ]]; then have+=("$key"); else missing+=("$key"); fi
   done
   (( ${#have} + ${#missing} )) || return 0
-  print -r -- "Private project notes live in ${DIR}/projects/<owner>/<repo>.md, outside the project repos and synced across VMs. Treat them like each repo's CLAUDE.md: edit those files to record durable, project-specific instructions (build/test commands, conventions), and never add a CLAUDE.md to a project itself unless asked."
+  print -r -- "Private project notes live in ${DIR}/projects/<owner>/<repo>.md (owner and repo in lowercase), outside the project repos and synced across VMs. Treat them like each repo's CLAUDE.md: edit those files to record durable, project-specific instructions (build/test commands, conventions), and never add a CLAUDE.md to a project itself unless asked."
   for key in "${have[@]}"; do
     print -r -- ""
     print -r -- "===== Notes for ${key} ====="
