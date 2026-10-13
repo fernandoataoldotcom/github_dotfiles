@@ -25,16 +25,17 @@ DIR="${CLAUDE_MEMORY_DIR:-$HOME/.claude-memory}"
 LOCK="${DIR}/.git/claude-memory-sync.lock"
 
 warn() { print -r -- "claude-memory-sync: $*" >&2; }
-g()    { GIT_TERMINAL_PROMPT=0 timeout 20 git -C "$DIR" "$@"; }
+# Fresh VMs may not have a git identity yet; never let that drop a memory. Commits
+# AND rebases need one, so it applies to every git call.
+IDENT=()
+[[ -n "$(git -C "$DIR" config user.email 2>/dev/null)" ]] \
+  || IDENT=(-c user.name=claude-memory-sync -c user.email=claude-memory-sync@localhost)
+g()    { GIT_TERMINAL_PROMPT=0 timeout 20 git -C "$DIR" "${IDENT[@]}" "$@"; }
 
 commit_local() {
   g add -A >/dev/null 2>&1
   g diff --cached --quiet >/dev/null 2>&1 && return 0
-  local -a ident=()
-  # Fresh VMs may not have a git identity yet; never let that drop a memory.
-  [[ -n "$(git config user.email 2>/dev/null)" ]] \
-    || ident=(-c user.name=claude-memory-sync -c user.email=claude-memory-sync@localhost)
-  g "${ident[@]}" commit --quiet -m "memory: ${HOST:-unknown} $(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>/dev/null \
+  g commit --quiet -m "memory: ${HOST:-unknown} $(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>/dev/null \
     || warn "commit failed; changes stay in the working tree."
 }
 

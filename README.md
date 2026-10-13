@@ -39,11 +39,9 @@ copied to `~/.dotfiles-backup-<timestamp>/` first.
   **Claude memory** repo (see below). Then `exec`s the new shell
   (`DOTFILES_NO_EXEC=1` to opt out).
 
-It does **not** install system packages. Install these yourself if missing:
-
-```sh
-tmux (>=3.2)  gh  jq  kubectl  vim
-```
+It does **not** install system packages. It expects `tmux` (>=3.2), `gh`, `jq`,
+`kubectl` and `vim`, and prints a warning naming any that are missing; when they
+are all there it says nothing.
 
 ## Claude Code
 
@@ -98,6 +96,19 @@ session. If the clone is missing, sync is a no-op and memory stays VM-local.
    installer (no path needed).
 4. **Custom domains → Set up a domain** → `setup.decentturing.com` (DNS + TLS are automatic
    since the zone is on Cloudflare).
+
+## Testing
+
+```sh
+tests/run-in-docker.sh            # debian:bookworm
+tests/run-in-docker.sh trixie
+```
+
+Runs the real installer in a throwaway Debian container against the local checkout
+(`claude` and `gh` are stubbed, so no credentials or Claude download), then checks
+the result and exercises `claude-memory-sync` against a local remote. CI runs the
+same test on every PR and on `main`. Add a check there for every bug that reaches a
+VM.
 
 ## Versioning
 
