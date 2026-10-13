@@ -18,8 +18,8 @@
 # and the Claude Code CLI (official native installer, 'stable' channel). With a
 # terminal attached it then signs in to Claude and GitHub, clones the private Claude
 # memory repo and drops you into the new shell.
-# Does NOT install system packages -- install tmux/gh/jq/kubectl/vim yourself
-# (see README). Safe to re-run; backs up anything it would overwrite.
+# Does NOT install system packages -- it only tells you which of
+# tmux/gh/jq/kubectl/vim are missing (see README). Safe to re-run; backs up anything it would overwrite.
 
 set -euo pipefail
 
@@ -338,6 +338,23 @@ post_auth() {
   setup_memory
 }
 
+# Tools the shipped configs expect. Silent when they are all there (the usual images
+# ship them), so a line from this means the VM itself is missing something.
+check_deps() {
+  local -a missing=(); local c
+  for c in tmux gh jq kubectl vim; do
+    command -v "$c" >/dev/null 2>&1 || missing+=("$c")
+  done
+  if command -v tmux >/dev/null 2>&1 && [[ "$(tmux -V 2>/dev/null)" =~ '([0-9]+\.[0-9]+)' ]]; then
+    autoload -Uz is-at-least
+    is-at-least 3.2 "${match[1]}" || missing+=("tmux>=3.2 (found ${match[1]})")
+  fi
+  if (( ${#missing} )); then
+    warn "Missing tools on this VM (install them yourself): ${(j:, :)missing}"
+  fi
+  return 0
+}
+
 main() {
   os_guard
   select_repo_ref "$@"
@@ -353,7 +370,7 @@ main() {
   post_auth
   log "Done. Backups (if any): ${BACKUP_DIR}"
   print -r -- ""
-  print -r -- "Install deps yourself if missing: tmux(>=3.2) gh jq kubectl vim"
+  check_deps
   print -r -- "Claude Code: settings are at ~/.claude/settings.json."
   print -r -- "Reload tmux with 'tmux source-file ~/.tmux.conf'."
   # Hand over to the freshly configured shell (DOTFILES_NO_EXEC=1 to opt out). This
