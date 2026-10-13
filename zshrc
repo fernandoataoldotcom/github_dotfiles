@@ -129,7 +129,19 @@ alias .6='cd ../../../../../../'
 alias ~='cd ~'
 alias mkdir='mkdir -p'
 alias e='exit'
-alias t='tmux new-session -A -s main'   # attach to 'main' if it exists, else create it
+# t           attach to the persistent 'main' tmux session (create it if needed)
+# t <args>    plain tmux, e.g. `t ls`
+unalias t 2>/dev/null
+function t {
+  if (( $# )); then
+    tmux "$@"
+  elif [[ -n "$TMUX" ]]; then                     # already inside tmux: switch, don't nest
+    tmux has-session -t =main 2>/dev/null || tmux new-session -d -s main
+    tmux switch-client -t =main
+  else
+    tmux new-session -A -s main
+  fi
+}
 
 # CLAUDE
 # Sign in without the auto-opened browser tab: on a remote VM that tab redirects to
