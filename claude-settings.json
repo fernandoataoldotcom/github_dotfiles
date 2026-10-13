@@ -3,8 +3,34 @@
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   },
   "includeCoAuthoredBy": false,
+  "theme": "dark",
+  "autoUpdatesChannel": "stable",
+  "autoMemoryDirectory": "~/.claude-memory/memory",
   "permissions": {
     "allow": [],
     "deny": []
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.local/bin/claude-memory-sync\" start" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.local/bin/claude-memory-sync\" push-async" }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.local/bin/claude-memory-sync\" push-async" }
+        ]
+      }
+    ]
   }
 }
