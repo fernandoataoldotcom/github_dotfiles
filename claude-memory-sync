@@ -12,7 +12,8 @@
 # session's context, so nothing is ever written into the project repo.
 #
 #   claude-memory-sync start        pull, then print the notes for the repo in $PWD
-#   claude-memory-sync notes        print the notes for the repo in $PWD
+#                                   (or for each repo directly inside $PWD)
+#   claude-memory-sync notes        print the notes only
 #   claude-memory-sync pull         commit local changes, then rebase onto the remote
 #   claude-memory-sync push         commit local changes, rebase, push
 #   claude-memory-sync push-async   same as push, detached (hooks must return fast)
@@ -59,20 +60,40 @@ push() {
   g push --quiet -u origin HEAD 2>/dev/null || warn "push failed; will retry on the next sync."
 }
 
-# Notes for the git repo containing $PWD, keyed by its origin (<owner>/<repo>).
-notes() {
-  local url; url="$(git remote get-url origin 2>/dev/null)" || return 0
+# <owner>/<repo> for the git repo at $1, from its origin; empty if it has none.
+repo_key() {
+  local url; url="$(git -C "$1" remote get-url origin 2>/dev/null)" || return 0
   url="${url%.git}"
   local -a parts=("${(@s:/:)${url//://}}")
   (( ${#parts} >= 2 )) || return 0
-  local key="${parts[-2]//[^A-Za-z0-9._-]/_}/${parts[-1]//[^A-Za-z0-9._-]/_}"
-  local f="${DIR}/projects/${key}.md"
-  if [[ -s "$f" ]]; then
-    print -r -- "Private project notes for ${key} (treat like a CLAUDE.md for this repo). They live in ${f}, outside the project repo and synced across VMs: edit that file to change them, and never add a CLAUDE.md to the project itself unless asked."
-    print -r -- ""
-    cat "$f"
+  print -r -- "${parts[-2]//[^A-Za-z0-9._-]/_}/${parts[-1]//[^A-Za-z0-9._-]/_}"
+}
+
+# Notes for the git repo containing $PWD. When $PWD is not in a repo (a workspace
+# folder holding several clones), notes for each repo directly inside it.
+notes() {
+  local -a dirs=()
+  if git rev-parse --show-toplevel >/dev/null 2>&1; then
+    dirs=("$(git rev-parse --show-toplevel)")
   else
-    print -r -- "No private project notes for ${key} yet. Durable, project-specific instructions (build/test commands, conventions) belong in ${f}, which is outside the project repo and synced across VMs; do not add a CLAUDE.md to the project itself unless asked."
+    dirs=(*/.git(N:h)); dirs=("${(@)dirs[1,12]}")
+  fi
+  local d key f; local -a have=() missing=()
+  for d in "${dirs[@]}"; do
+    [[ -n "$d" ]] || continue
+    key="$(repo_key "$d")"; [[ -n "$key" ]] || continue
+    if [[ -s "${DIR}/projects/${key}.md" ]]; then have+=("$key"); else missing+=("$key"); fi
+  done
+  (( ${#have} + ${#missing} )) || return 0
+  print -r -- "Private project notes live in ${DIR}/projects/<owner>/<repo>.md, outside the project repos and synced across VMs. Treat them like each repo's CLAUDE.md: edit those files to record durable, project-specific instructions (build/test commands, conventions), and never add a CLAUDE.md to a project itself unless asked."
+  for key in "${have[@]}"; do
+    print -r -- ""
+    print -r -- "===== Notes for ${key} ====="
+    cat "${DIR}/projects/${key}.md"
+  done
+  if (( ${#missing} )); then
+    print -r -- ""
+    print -r -- "No notes yet for: ${(j:, :)missing}"
   fi
 }
 
