@@ -14,6 +14,14 @@ Keep `https://` (plain http only redirects, and that first hop is unauthenticate
 and `-f` (fail instead of piping an error page into zsh). Nothing else is needed;
 getting shorter than this takes a shorter domain.
 
+If `setup.decentturing.com` is down, fetch the same script from GitHub. Cloudflare
+Pages only serves this entry script; the installer fetches everything else from
+GitHub anyway, so the result is identical:
+
+```sh
+curl -f https://raw.githubusercontent.com/fernandoataoldotcom/github_dotfiles/main/install|zsh
+```
+
 An interactive run prompts you to pick a tagged version (use immutable tags for
 reproducible installs), then signs in to Claude and GitHub, clones the Claude memory repo and
 drops you into the new shell. It is safe to re-run — anything it would overwrite is
