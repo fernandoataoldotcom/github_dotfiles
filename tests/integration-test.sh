@@ -39,6 +39,7 @@ for f in install claude-memory-sync zshrc fernandoataoldotcom-functions.zsh; do
   check "zsh -n parses $f" zsh -n "$REPO/$f"
 done
 check "claude-settings.json is valid JSON" jq -e . "$REPO/claude-settings.json" >/dev/null
+check "vscode-machine-settings.json is valid JSON" jq -e . "$REPO/vscode-machine-settings.json" >/dev/null
 r_tag="$(env -u REPO_RAW DOTFILES_REF='v9.9.9-test' DOTFILES_RESOLVE_ONLY=1 zsh "$REPO/install" 2>/dev/null | grep '^REPO_RAW=')"
 [ "$r_tag" = "REPO_RAW=https://raw.githubusercontent.com/fernandoataoldotcom/github_dotfiles/v9.9.9-test" ] \
   && pass "DOTFILES_REF resolves REPO_RAW to that tag's raw URL" || fail "tag resolution wrong: $r_tag"
@@ -73,6 +74,11 @@ export FAKE_MEMORY_REMOTE="$WORK/memory-remote.git"
 git init -q --bare -b main "$FAKE_MEMORY_REMOTE"
 git config --global user.name null          # what `yolo` writes for a profile with no name
 git config --global init.defaultBranch main
+
+# What the VM image already puts in the VS Code machine settings; must survive the merge.
+VSM="$HOME/.vscode-server/data/Machine/settings.json"
+mkdir -p "${VSM%/*}"
+echo '{"workbench.colorTheme": "Dark 2026", "security.workspace.trust.enabled": false}' > "$VSM"
 
 note "Run the installer against the LOCAL checkout (no terminal attached)"
 REPO_RAW="file://$REPO" zsh "$REPO/install" 2>&1 | tee "$WORK/install.log"
@@ -155,13 +161,25 @@ esac
 [ "$(cat "$HOME/handoff-tmux-rc" 2>/dev/null)" = 0 ] \
   && pass "tmux attaches from the handed-off shell" || fail "tmux failed: $(cat "$HOME/handoff-tmux-err" 2>/dev/null)"
 
+note "VS Code machine settings"
+[ "$(jq -r '."workbench.secondarySideBar.defaultVisibility"' "$VSM")" = hidden ] \
+  && pass "chat sidebar hidden by default" || fail "defaultVisibility is not hidden: $(cat "$VSM")"
+[ "$(jq -r '."workbench.colorTheme"' "$VSM")" = "Dark 2026" ] && [ "$(jq -r '."security.workspace.trust.enabled"' "$VSM")" = false ] \
+  && pass "keys already in the file are kept" || fail "existing VS Code settings lost: $(cat "$VSM")"
+ls "$HOME"/.dotfiles-backup-*/.vscode-server/data/Machine/settings.json >/dev/null 2>&1 \
+  && pass "original VS Code settings backed up" || fail "VS Code settings not backed up"
+
 note "Idempotency and backups"
-before="$(sha256sum "$HOME/.zshrc" "$HOME/.claude/settings.json")"
+before="$(sha256sum "$HOME/.zshrc" "$HOME/.claude/settings.json" "$VSM")"
 REPO_RAW="file://$REPO" zsh "$REPO/install" >/dev/null 2>&1 || fail "re-run failed"
-[ "$before" = "$(sha256sum "$HOME/.zshrc" "$HOME/.claude/settings.json")" ] \
-  && pass "re-run leaves ~/.zshrc and settings.json identical" || fail "re-run changed config files"
+[ "$before" = "$(sha256sum "$HOME/.zshrc" "$HOME/.claude/settings.json" "$VSM")" ] \
+  && pass "re-run leaves ~/.zshrc, settings.json and VS Code settings identical" || fail "re-run changed config files"
 ls -d "$HOME"/.dotfiles-backup-* >/dev/null 2>&1 && pass "timestamped backup directory created" || fail "no backup directory"
 check "re-run keeps the memory clone" test -d "$HOME/.claude-memory/.git"
+printf '{\n  // a comment makes this JSONC\n  "editor.fontSize": 14,\n}\n' > "$VSM"; jsonc="$(sha256sum "$VSM")"
+REPO_RAW="file://$REPO" zsh "$REPO/install" >"$WORK/jsonc.log" 2>&1 || fail "re-run with JSONC VS Code settings failed"
+[ "$jsonc" = "$(sha256sum "$VSM")" ] && grep -q "is not plain JSON" "$WORK/jsonc.log" \
+  && pass "JSONC VS Code settings left alone, with a warning" || fail "JSONC VS Code settings were changed or not warned about"
 
 note "claude-memory-sync: two VMs, one remote"
 SYNC="$HOME/.local/bin/claude-memory-sync"

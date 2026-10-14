@@ -181,6 +181,37 @@ fetch_configs() {
   fetch "https://raw.githubusercontent.com/junegunn/vim-plug/${VIM_PLUG_REF}/plug.vim" ~/.vim/autoload/plug.vim
 }
 
+# VS Code server (Remote-SSH, devcontainers, `code serve-web`) machine settings. Under
+# serve-web, user settings live in the browser and are lost with each VM, so the
+# settings we want everywhere go here. Merged with jq, never overwritten: the VM
+# image may have put its own keys in this file.
+VSCODE_MACHINE_SETTINGS="${HOME}/.vscode-server/data/Machine/settings.json"
+merge_vscode_settings() {
+  local ours; ours="$(mktemp)"
+  if ! curl -fsSL "${REPO_RAW}/vscode-machine-settings.json" -o "$ours" 2>/dev/null; then
+    warn "vscode-machine-settings.json is not in this ref; VS Code settings unchanged."
+    rm -f "$ours"; return 0
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    warn "jq is missing; VS Code settings unchanged."
+    rm -f "$ours"; return 0
+  fi
+  local t="$VSCODE_MACHINE_SETTINGS" merged; merged="$(mktemp)"
+  if [[ -s "$t" ]]; then
+    # jq can't read JSONC (comments, trailing commas): leave such a file alone.
+    if jq -s '.[0] * .[1]' "$t" "$ours" >"$merged" 2>/dev/null; then
+      if ! cmp -s "$merged" "$t"; then
+        backup_one "$t"; cat "$merged" >"$t"; log "  merged: $t"
+      fi
+    else
+      warn "$t is not plain JSON; add these by hand: $(jq -c . "$ours")"
+    fi
+  else
+    mkdir -p "${t:h}"; jq . "$ours" >"$t"; log "  created: $t"
+  fi
+  rm -f "$ours" "$merged"
+}
+
 clone_plugin() {                   # idempotent; tolerates already-installed under set -e
   local url="$1" ref="$2" sha="$3" dir="$4"
   [[ -d "$dir/.git" ]] && { log "  plugin present: ${dir:t}"; return 0; }
@@ -364,6 +395,7 @@ main() {
   install_omz
   install_zsh_plugins
   fetch_configs
+  merge_vscode_settings
   install_vim_plugins
   install_claude_code
   claude_login

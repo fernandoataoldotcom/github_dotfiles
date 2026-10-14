@@ -36,6 +36,12 @@ copied to `~/.dotfiles-backup-<timestamp>/` first.
 - Fetches config files for this ref: `zshrc` → `~/.zshrc`, `fernandoataoldotcom-functions.zsh`
   (custom functions, e.g. `go-rebase`), `tmux.conf`, `vimrc` (+ vim-plug), `htoprc`,
   and `claude-settings.json` → `~/.claude/settings.json`.
+- Merges `vscode-machine-settings.json` into the VS Code server's machine settings
+  (`~/.vscode-server/data/Machine/settings.json`). Today that only hides the chat
+  (Copilot) sidebar by default. It adds keys and keeps the ones already there,
+  backs the file up first, and skips a file that has comments (JSONC) with a warning.
+  This is needed because under `code serve-web` your user settings live in the browser,
+  so they don't carry over to a new VM.
 - Runs `vim +PlugInstall` if `vim` is present.
 - Installs the **Claude Code CLI** from the `stable` channel via Anthropic's official
   native installer (user-local, no Node/sudo, SHA256-verified). If the image already
