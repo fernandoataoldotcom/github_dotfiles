@@ -23,12 +23,15 @@
 
 set -euo pipefail
 
-# Which version of this repo to install config files from. An interactive run
-# ALWAYS prompts you to choose (the menu uses /dev/tty, so `curl ... | zsh` works).
-# Escape hatches: REPO_RAW (explicit source, e.g. file:///repo for tests) overrides
-# everything; and only when there is NO TTY, DOTFILES_REF / `zsh -s -- <tag>`, else
-# newest tag, else main. Use immutable tags for reproducible, tamper-evident installs.
+# Which version of this repo to install. Default: the newest tag, no questions.
+# That tag's OWN installer runs (not just its config files), so a tag pins the whole
+# install. Escape hatches, e.g. to roll back to a known-good tag:
+#   DOTFILES_REF=<tag> / `zsh -s -- <tag>`   install that tag (or main)
+#   DOTFILES_PICK=1                          choose from a menu (needs a terminal)
+#   REPO_RAW=<url>                           explicit config source, runs THIS installer
+#                                            (e.g. file:///repo for tests)
 REPO_SLUG="${REPO_SLUG:-fernandoataoldotcom/github_dotfiles}"
+RAW_BASE="${DOTFILES_RAW_BASE:-https://raw.githubusercontent.com}"   # overridable for tests
 REPO_RAW="${REPO_RAW:-}"
 DOTFILES_REF="${DOTFILES_REF:-}"
 
@@ -82,7 +85,7 @@ list_tags() {
     | awk -F/ '{print $NF}' | sort -rV
 }
 
-# Interactive picker -- called only when /dev/tty is available. The menu is written
+# Interactive picker (DOTFILES_PICK=1) -- needs /dev/tty. The menu is written
 # to and read from /dev/tty (works even though the piped script is stdin); only the
 # chosen ref is printed to stdout so it can be captured.
 pick_tag() {
@@ -114,25 +117,30 @@ pick_tag() {
   fi
 }
 
-# Resolve REPO_RAW. Interactive runs ALWAYS prompt; REPO_RAW / DOTFILES_REF are
-# escape hatches for automation.
+# Resolve the ref to install and REPO_RAW, then hand over to that ref's installer.
 select_repo_ref() {
   if [[ -n "$REPO_RAW" ]]; then
     log "Using REPO_RAW override: ${REPO_RAW}"; return 0
   fi
-  local ref=""
-  if has_tty; then
-    ref="$(pick_tag)"                            # interactive: always ask the human
-  else
-    ref="${DOTFILES_REF:-${1:-}}"                # no TTY (CI/automation): env / positional
-    if [[ -z "$ref" ]]; then
-      local tags; tags="$(list_tags)"
-      if [[ -n "$tags" ]]; then local -a arr=("${(@f)tags}"); ref="${arr[1]}"; else ref="refs/heads/main"; fi
-    fi
-    warn "No TTY; non-interactive install from ref: ${ref}"
+  local ref="${DOTFILES_REF:-${1:-}}"
+  if [[ -z "$ref" && -n "${DOTFILES_PICK:-}" ]]; then
+    has_tty || die "DOTFILES_PICK needs a terminal; set DOTFILES_REF=<tag> instead."
+    ref="$(pick_tag)"
   fi
-  REPO_RAW="https://raw.githubusercontent.com/${REPO_SLUG}/${ref}"
-  log "Installing config files from ref: ${ref}"
+  if [[ -z "$ref" ]]; then
+    local tags; tags="$(list_tags)"
+    if [[ -n "$tags" ]]; then local -a arr=("${(@f)tags}"); ref="${arr[1]}"; else ref="refs/heads/main"; fi
+  fi
+  REPO_RAW="${RAW_BASE}/${REPO_SLUG}/${ref}"
+  log "Installing ${REPO_SLUG} @ ${ref}"
+  # The served installer is always main's. For a tag, run that tag's installer so
+  # rolling back to an old tag also rolls back a broken installer. It gets REPO_RAW,
+  # which every version honours, so it neither prompts nor hands over again.
+  if [[ "$ref" != refs/heads/main && -z "${DOTFILES_RESOLVE_ONLY:-}" ]]; then
+    local script; script="$(curl -fsSL "${REPO_RAW}/install")" \
+      || die "Could not download the installer for ${ref} (does the tag exist?)."
+    REPO_RAW="$REPO_RAW" DOTFILES_REF="$ref" exec zsh -c "$script" install
+  fi
 }
 
 backup_one() {                     # copy (not move) existing target into timestamped backup

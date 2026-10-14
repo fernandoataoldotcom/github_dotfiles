@@ -22,8 +22,8 @@ GitHub anyway, so the result is identical:
 curl -f https://raw.githubusercontent.com/fernandoataoldotcom/github_dotfiles/main/install|zsh
 ```
 
-An interactive run prompts you to pick a tagged version (use immutable tags for
-reproducible installs), then signs in to Claude and GitHub, clones the Claude memory repo and
+It installs the newest tagged version without asking (the tag's own installer runs,
+so a tag pins the whole install), then signs in to Claude and GitHub, clones the Claude memory repo and
 drops you into the new shell. It is safe to re-run — anything it would overwrite is
 copied to `~/.dotfiles-backup-<timestamp>/` first.
 
@@ -97,10 +97,20 @@ mm-analytics `sfdiag`). Tools that use the keys still work; Claude just can't
 open the files and pull a key into a transcript. This blocks the Read and Edit
 tools only, not a `cat` run through Bash.
 
+## Rolling back
+
+If a new tag breaks VMs, install a known-good one; its own installer runs, not
+main's:
+
+```sh
+curl -f https://setup.decentturing.com|DOTFILES_REF=v2.0.4 zsh    # a specific tag
+curl -f https://setup.decentturing.com|DOTFILES_PICK=1 zsh        # choose from a menu
+```
+
 ## Escape hatches / automation
 
 - `REPO_RAW=<url>` — explicit config source (overrides everything; e.g. `file:///repo` for tests).
-- `DOTFILES_REF=<tag>` or `zsh -s -- <tag>` — pick a ref non-interactively (no TTY).
+- `DOTFILES_REF=<tag>` or `zsh -s -- <tag>` — install that tag (or `refs/heads/main`); `DOTFILES_PICK=1` — menu.
 - `DOTFILES_RESOLVE_ONLY=1` — dry run: print the resolved `REPO_RAW` and exit.
 - `CLAUDE_CHANNEL=<stable|latest|X.Y.Z>`, `MEMORY_REPO=<owner/repo>`, `DOTFILES_NO_EXEC=1` — see above.
 
@@ -132,7 +142,7 @@ VM.
 
 ## Versioning
 
-Cut a tag to enable the version picker and reproducible installs:
+New VMs install the newest tag, so a merge reaches them only once it is tagged:
 
 ```sh
 git tag v1 && git push --tags
