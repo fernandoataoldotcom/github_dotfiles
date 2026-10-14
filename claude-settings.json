@@ -8,7 +8,7 @@
   "autoMemoryDirectory": "~/.claude-memory/memory",
   "permissions": {
     "allow": [],
-    "deny": []
+    "deny": ["Read(~/.snowflake/**)", "Edit(~/.snowflake/**)"]
   },
   "hooks": {
     "SessionStart": [

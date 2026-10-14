@@ -103,6 +103,10 @@ s="$HOME/.claude/settings.json"
 [ "$(jq -r .autoUpdatesChannel "$s")" = stable ] && pass "settings: autoUpdatesChannel=stable" || fail "autoUpdatesChannel not stable"
 [ "$(jq -r .autoMemoryDirectory "$s")" = '~/.claude-memory/memory' ] && pass "settings: autoMemoryDirectory set" || fail "autoMemoryDirectory wrong"
 [ "$(jq -r 'has("model")' "$s")" = false ] && pass "settings: no pinned model" || fail "settings pin a model"
+for r in 'Read(~/.snowflake/**)' 'Edit(~/.snowflake/**)'; do
+  jq -e --arg r "$r" '.permissions.deny | index($r)' "$s" >/dev/null \
+    && pass "settings: deny $r" || fail "settings: $r not denied"
+done
 for h in SessionStart Stop SessionEnd; do
   jq -e --arg h "$h" '.hooks[$h][0].hooks[0].command | test("claude-memory-sync")' "$s" >/dev/null \
     && pass "settings: $h hook runs claude-memory-sync" || fail "$h hook missing"
