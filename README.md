@@ -77,6 +77,12 @@ Claude to "update the project notes" instead of running `/init`.
 Keep it private: memories can hold project details and are read back into every
 session. If the clone is missing, sync is a no-op and memory stays VM-local.
 
+**Keys stay out of the conversation.** The settings deny Claude's `Read` and `Edit`
+tools on `~/.snowflake/**`, where Snowflake private keys live (e.g. for
+mm-analytics `sfdiag`). Tools that use the keys still work; Claude just can't
+open the files and pull a key into a transcript. This blocks the Read and Edit
+tools only, not a `cat` run through Bash.
+
 ## Escape hatches / automation
 
 - `REPO_RAW=<url>` — explicit config source (overrides everything; e.g. `file:///repo` for tests).
