@@ -147,10 +147,11 @@ note "zshrc regressions"
 note "Shell hand-off under a terminal, script piped on stdin (as curl|zsh does)"
 # The commands on script's stdin are typed into the pty and read by the shell the
 # installer execs. v2.0.0 gave that shell /dev/tty as stdin, which tmux refuses.
+# Keep them on ONE line: the shell reads a whole line before running it, but while
+# tmux is attached it reads the pty too and can swallow a later line, leaving the
+# shell waiting for an `exit` it never gets (flaked once on bookworm in CI).
 tmux -L handoff new-session -d -s probe 'sleep 120'
-printf '%s\n' 'tty > "$HOME/handoff-tty"' \
-  'TERM=xterm tmux -L handoff attach -t probe \; detach-client >/dev/null 2>"$HOME/handoff-tmux-err"; echo $? > "$HOME/handoff-tmux-rc"' \
-  'exit' \
+printf '%s\n' 'tty > "$HOME/handoff-tty"; TERM=xterm tmux -L handoff attach -t probe \; detach-client >/dev/null 2>"$HOME/handoff-tmux-err"; echo $? > "$HOME/handoff-tmux-rc"; exit' \
   | timeout 600 script -qec "cat '$REPO/install' | REPO_RAW='file://$REPO' zsh" /dev/null >"$WORK/handoff.log" 2>&1 \
   || { tail -20 "$WORK/handoff.log"; fail "installer under a terminal did not finish"; }
 tmux -L handoff kill-server 2>/dev/null || true
