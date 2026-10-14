@@ -48,6 +48,28 @@ r_ovr="$(REPO_RAW="file://$REPO" DOTFILES_REF='v1' DOTFILES_RESOLVE_ONLY=1 zsh "
   && pass "explicit REPO_RAW overrides DOTFILES_REF" || fail "REPO_RAW override failed: $r_ovr"
 [ ! -e "$HOME/.oh-my-zsh" ] && pass "dry run made no changes" || fail "DOTFILES_RESOLVE_ONLY installed something"
 
+note "Version selection (default newest tag, rollback escape hatches)"
+newest="$(git ls-remote --tags --refs https://github.com/fernandoataoldotcom/github_dotfiles | awk -F/ '{print $NF}' | sort -rV | head -1)"
+# With a terminal and nothing typed: must not wait for a menu (stdin is /dev/null, so
+# a prompt would block until the timeout).
+r_def="$(cd "$WORK" && timeout 60 script -qec "DOTFILES_RESOLVE_ONLY=1 zsh '$REPO/install'" /dev/null </dev/null | tr -d '\r' | grep '^REPO_RAW=' || true)"
+[ "$r_def" = "REPO_RAW=https://raw.githubusercontent.com/fernandoataoldotcom/github_dotfiles/$newest" ] \
+  && pass "with a terminal, installs the newest tag ($newest) without prompting" || fail "default resolution: '$r_def'"
+DOTFILES_PICK=1 DOTFILES_RESOLVE_ONLY=1 zsh "$REPO/install" >/dev/null 2>&1 \
+  && fail "DOTFILES_PICK without a terminal should refuse" || pass "DOTFILES_PICK without a terminal refuses instead of hanging"
+# Rollback: the chosen tag's OWN installer must run, with REPO_RAW pointing at it.
+raw="$WORK/raw"; mkdir -p "$raw/fernandoataoldotcom/github_dotfiles/v0.0.1-old"
+printf '%s\n' 'print -r -- "OLD-INSTALLER REPO_RAW=$REPO_RAW ARGS=$*"' > "$raw/fernandoataoldotcom/github_dotfiles/v0.0.1-old/install"
+out="$(DOTFILES_RAW_BASE="file://$raw" DOTFILES_REF=v0.0.1-old zsh "$REPO/install" 2>&1)"
+grep -qx "OLD-INSTALLER REPO_RAW=file://$raw/fernandoataoldotcom/github_dotfiles/v0.0.1-old ARGS=" <<<"$out" \
+  && pass "DOTFILES_REF=<tag> runs that tag's installer, pointed at that tag's files" || fail "rollback hand-over: $out"
+out="$(DOTFILES_RAW_BASE="file://$raw" zsh -s -- v0.0.1-old < "$REPO/install" 2>&1)"
+grep -q "^OLD-INSTALLER REPO_RAW=file://$raw/fernandoataoldotcom/github_dotfiles/v0.0.1-old" <<<"$out" \
+  && pass "'zsh -s -- <tag>' does the same" || fail "positional rollback: $out"
+DOTFILES_RAW_BASE="file://$raw" DOTFILES_REF=v9.9.9-missing zsh "$REPO/install" >/dev/null 2>&1 \
+  && fail "a missing tag should abort" || pass "a tag that does not exist aborts before changing anything"
+[ ! -e "$HOME/.oh-my-zsh" ] && pass "none of the above changed \$HOME" || fail "version-selection checks installed something"
+
 note "Stub claude and gh; seed a fake memory remote"
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/claude" <<'STUB'
