@@ -118,6 +118,8 @@ for h in SessionStart Stop SessionEnd; do
     && pass "settings: $h hook runs claude-memory-sync" || fail "$h hook missing"
 done
 check "claude-memory-sync installed and executable" test -x "$HOME/.local/bin/claude-memory-sync"
+grep -qx '@~/.claude-memory/context/preferences.md' "$HOME/.claude/CLAUDE.md" \
+  && pass "personal ~/.claude/CLAUDE.md imports the shared preferences" || fail "~/.claude/CLAUDE.md missing or without the import"
 
 note "Post-install: GitHub-dependent steps"
 [ "$(git config --global user.name)" = ci-user ] \
