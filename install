@@ -162,7 +162,7 @@ install_omz() {                    # pinned clone; non-interactive; we ship our 
   fi
 }
 
-fetch() { local u="$1" d="$2"; mkdir -p "${d:h}"; curl -fsSL "$u" -o "$d"; log "  fetched: $d"; }
+fetch() { local u="$1" d="$2"; mkdir -p "${d:h}"; curl -fsSL "$u" -o "$d" || return; log "  fetched: $d"; }
 fetch_configs() {
   log "Fetching configs and custom scripts"
   mkdir -p ~/.oh-my-zsh/custom

@@ -184,6 +184,22 @@ REPO_RAW="file://$REPO" zsh "$REPO/install" >"$WORK/jsonc.log" 2>&1 || fail "re-
 [ "$jsonc" = "$(sha256sum "$VSM")" ] && grep -q "is not plain JSON" "$WORK/jsonc.log" \
   && pass "JSONC VS Code settings left alone, with a warning" || fail "JSONC VS Code settings were changed or not warned about"
 
+note "Older refs without the newer files"
+# A ref from before claude-memory-sync / claude-CLAUDE.md existed must install with a
+# warning for each, never claim it fetched them, and never chmod a missing file.
+old_ref="$WORK/old-ref"; mkdir -p "$old_ref"
+for f in zshrc fernandoataoldotcom-functions.zsh tmux.conf htoprc vimrc claude-settings.json; do cp "$REPO/$f" "$old_ref/"; done
+mv "$HOME/.local/bin/claude-memory-sync" "$WORK/claude-memory-sync.saved"
+REPO_RAW="file://$old_ref" zsh "$REPO/install" >"$WORK/old-ref.log" 2>&1 \
+  && pass "install from a ref without the new files completes" || { tail -5 "$WORK/old-ref.log"; fail "install from an older ref aborted"; }
+grep -q 'claude-memory-sync is not in this ref' "$WORK/old-ref.log" && grep -q 'claude-CLAUDE.md is not in this ref' "$WORK/old-ref.log" \
+  && pass "warns about each missing file" || fail "missing-file warnings absent: $(grep -i warn "$WORK/old-ref.log")"
+grep -qE 'fetched: .*(claude-memory-sync|CLAUDE\.md)' "$WORK/old-ref.log" \
+  && fail "logged 'fetched' for a file that was not fetched" || pass "does not log 'fetched' for missing files"
+grep -q 'chmod' "$WORK/old-ref.log" && fail "chmod ran against a missing file" || pass "no chmod against a missing file"
+mv "$WORK/claude-memory-sync.saved" "$HOME/.local/bin/claude-memory-sync"
+REPO_RAW="file://$REPO" zsh "$REPO/install" >/dev/null 2>&1 || fail "reinstall from the checkout failed"
+
 note "claude-memory-sync: two VMs, one remote"
 SYNC="$HOME/.local/bin/claude-memory-sync"
 A="$HOME/.claude-memory"; B="$WORK/vmB"
