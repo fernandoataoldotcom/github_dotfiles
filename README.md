@@ -88,6 +88,11 @@ The session-start hook prints that file into Claude's context when you start
 to two levels down (it then prints the notes for each), so nothing is written to the project. Ask
 Claude to "update the project notes" instead of running `/init`.
 
+**Personal preferences in every session.** `claude-CLAUDE.md` is installed as
+`~/.claude/CLAUDE.md` and only imports `~/.claude-memory/context/preferences.md`,
+which chat sessions maintain. Code loads it in every session and project; edit the
+preferences in the memory repo, not here.
+
 Keep it private: memories can hold project details and are read back into every
 session. If the clone is missing, sync is a no-op and memory stays VM-local.
 

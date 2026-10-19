@@ -151,7 +151,7 @@ backup_one() {                     # copy (not move) existing target into timest
 }
 backup_existing() {
   log "Backing up any existing files to ${BACKUP_DIR}"
-  for f in ~/.tmux.conf ~/.vimrc ~/.config/htop/htoprc ~/.zshrc ~/.claude/settings.json \
+  for f in ~/.tmux.conf ~/.vimrc ~/.config/htop/htoprc ~/.zshrc ~/.claude/settings.json ~/.claude/CLAUDE.md \
            ~/.local/bin/claude-memory-sync \
            ~/.oh-my-zsh/custom/fernandoataoldotcom-functions.zsh; do
     backup_one "$f"
@@ -170,7 +170,7 @@ install_omz() {                    # pinned clone; non-interactive; we ship our 
   fi
 }
 
-fetch() { local u="$1" d="$2"; mkdir -p "${d:h}"; curl -fsSL "$u" -o "$d"; log "  fetched: $d"; }
+fetch() { local u="$1" d="$2"; mkdir -p "${d:h}"; curl -fsSL "$u" -o "$d" || return; log "  fetched: $d"; }
 fetch_configs() {
   log "Fetching configs and custom scripts"
   mkdir -p ~/.oh-my-zsh/custom
@@ -180,6 +180,9 @@ fetch_configs() {
   fetch "${REPO_RAW}/htoprc"              ~/.config/htop/htoprc
   fetch "${REPO_RAW}/vimrc"               ~/.vimrc
   fetch "${REPO_RAW}/claude-settings.json" ~/.claude/settings.json
+  # Older tags do not have this file; picking one must not abort the install.
+  fetch "${REPO_RAW}/claude-CLAUDE.md" ~/.claude/CLAUDE.md \
+    || warn "claude-CLAUDE.md is not in this ref; no personal CLAUDE.md installed."
   # Tags before v0.2.0 do not have this file; picking one must not abort the install.
   if fetch "${REPO_RAW}/claude-memory-sync" ~/.local/bin/claude-memory-sync; then
     chmod +x ~/.local/bin/claude-memory-sync
