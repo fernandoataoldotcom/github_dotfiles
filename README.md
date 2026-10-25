@@ -50,7 +50,8 @@ copied to `~/.dotfiles-backup-<timestamp>/` first.
 - With a terminal attached: signs in to **Claude** (`claude auth login` with
   `BROWSER` unset, so you get the paste-a-code URL instead of a tab that redirects
   to localhost on the VM; `claude-login` does the same later), logs in to **GitHub** (`yolo` if the image has it, else
-  `gh auth login`), repairs a `null` git `user.name`, and clones the private
+  `gh auth login`; gh's copy of the login code to the clipboard is turned off, since
+  it could only reach the VM's clipboard), repairs a `null` git `user.name`, and clones the private
   **Claude memory** repo (see below). Then `exec`s the new shell
   (`DOTFILES_NO_EXEC=1` to opt out).
 

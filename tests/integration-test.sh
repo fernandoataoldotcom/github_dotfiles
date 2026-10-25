@@ -85,6 +85,7 @@ cat > "$HOME/.local/bin/gh" <<'STUB'
 echo "$*" >> "$HOME/gh-calls.log"
 case "$1 ${2:-}" in
   "auth status") exit 0 ;;
+  "config list") echo "clipboard=enabled" ;;
   "api user")    echo "ci-user" ;;
   "repo clone")  exec git clone -q "$FAKE_MEMORY_REMOTE" "$4" ;;
   "repo view")   echo PRIVATE ;;
@@ -167,6 +168,12 @@ grep -qx '@~/.claude-memory/context/preferences.md' "$HOME/.claude/CLAUDE.md" \
   && pass "personal ~/.claude/CLAUDE.md imports the shared preferences" || fail "~/.claude/CLAUDE.md missing or without the import"
 
 note "Post-install: GitHub-dependent steps"
+# Must come before the login, which starts at the first `auth status`.
+clip_at="$(grep -nx 'config set clipboard disabled' "$HOME/gh-calls.log" | head -1 | cut -d: -f1 || true)"
+status_at="$(grep -nx 'auth status' "$HOME/gh-calls.log" | head -1 | cut -d: -f1 || true)"
+[ -n "$clip_at" ] && [ -n "$status_at" ] && [ "$clip_at" -lt "$status_at" ] \
+  && pass "gh's clipboard copy of the login code is turned off before login" \
+  || fail "gh clipboard copy not turned off before login (line ${clip_at:-none}, login at ${status_at:-none})"
 [ "$(git config --global user.name)" = ci-user ] \
   && pass "git user.name 'null' repaired from the GitHub login" || fail "user.name is '$(git config --global user.name)'"
 check "memory repo cloned to ~/.claude-memory" test -d "$HOME/.claude-memory/.git"

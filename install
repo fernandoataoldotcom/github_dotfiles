@@ -364,6 +364,13 @@ post_auth() {
     warn "gh not found; skipping GitHub login and Claude memory setup."
     return 0
   fi
+  # gh copies the login code to the clipboard by default and warns when it can't. On
+  # these VMs the copy could only reach the VM's own clipboard, never the user's
+  # machine, so turn it off; the code is still printed. An older gh has no such
+  # setting (and never copies), and setting an unknown key only adds a warning.
+  if gh config list 2>/dev/null | grep '^clipboard=' >/dev/null; then
+    gh config set clipboard disabled >/dev/null || warn "could not turn off gh's clipboard copy."
+  fi
   if ! gh auth status >/dev/null 2>&1; then
     if ! has_tty; then
       warn "No TTY; skipping GitHub login. Log in later ('yolo' or 'gh auth login') and re-run for Claude memory sync."
