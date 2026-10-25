@@ -115,6 +115,10 @@ the secret. The diff goes to gitleaks on stdin, so it works where the Docker dae
 can't bind-mount the repo. Without Docker, Claude's commits and pushes are blocked.
 It only sees git commands Claude runs, not yours.
 
+**Status line.** [`claude-statusline`](claude-statusline) (from venkatamutyala/dotfiles,
+installed as `~/.claude/statusline.sh`) shows `model | dir (branch) | ctx N%` under
+the prompt, so you can see when the context is filling up.
+
 ## Rolling back
 
 If a new tag breaks VMs, install a known-good one; its own installer runs, not

@@ -149,6 +149,12 @@ check "claude-memory-sync installed and executable" test -x "$HOME/.local/bin/cl
 jq -e '.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[0].command | test("gitleaks-guard")' "$s" >/dev/null \
   && pass "settings: PreToolUse(Bash) hook runs the gitleaks guard" || fail "gitleaks PreToolUse hook missing"
 check "gitleaks guard installed and executable" test -x "$HOME/.claude/hooks/gitleaks-guard.sh"
+[ "$(jq -r .statusLine.command "$s")" = '"$HOME/.claude/statusline.sh"' ] && pass "settings: status line wired" || fail "statusLine not wired"
+sl="$WORK/sl-repo"; git init -q -b feat/x "$sl"
+out="$(jq -n --arg d "$sl" '{model: {display_name: "Opus"}, workspace: {current_dir: $d}, context_window: {used_percentage: 42.7}}' | "$HOME/.claude/statusline.sh")"
+[ "$out" = "Opus | sl-repo (feat/x) | ctx 42%" ] && pass "status line: model | dir (branch) | ctx %" || fail "status line printed: $out"
+out="$(jq -n '{model: {display_name: "Opus"}, workspace: {current_dir: "/tmp"}, context_window: {used_percentage: null}}' | "$HOME/.claude/statusline.sh")"
+[ "$out" = "Opus | tmp" ] && pass "status line: no branch or ctx when absent" || fail "status line printed: $out"
 grep -qx '@~/.claude-memory/context/preferences.md' "$HOME/.claude/CLAUDE.md" \
   && pass "personal ~/.claude/CLAUDE.md imports the shared preferences" || fail "~/.claude/CLAUDE.md missing or without the import"
 

@@ -6,6 +6,7 @@
   "theme": "dark",
   "autoUpdatesChannel": "stable",
   "autoMemoryDirectory": "~/.claude-memory/memory",
+  "statusLine": { "type": "command", "command": "\"$HOME/.claude/statusline.sh\"" },
   "permissions": {
     "allow": [],
     "ask": ["Read(//**/.env)", "Edit(//**/.env)"],
