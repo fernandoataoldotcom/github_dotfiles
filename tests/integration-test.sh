@@ -131,9 +131,15 @@ s="$HOME/.claude/settings.json"
 [ "$(jq -r .autoUpdatesChannel "$s")" = stable ] && pass "settings: autoUpdatesChannel=stable" || fail "autoUpdatesChannel not stable"
 [ "$(jq -r .autoMemoryDirectory "$s")" = '~/.claude-memory/memory' ] && pass "settings: autoMemoryDirectory set" || fail "autoMemoryDirectory wrong"
 [ "$(jq -r 'has("model")' "$s")" = false ] && pass "settings: no pinned model" || fail "settings pin a model"
-for r in 'Read(~/.snowflake/**)' 'Edit(~/.snowflake/**)'; do
+for r in 'Read(~/.snowflake/**)' 'Edit(~/.snowflake/**)' 'Read(~/.ssh/**)' 'Edit(~/.ssh/**)' \
+         'Read(~/.claude/.credentials.json)' 'Read(~/.git-credentials)' 'Bash(gh auth token)' \
+         'Bash(gh auth token *)' 'Bash(kubectl *get *secret*)' 'Bash(kubectl *describe *secret*)'; do
   jq -e --arg r "$r" '.permissions.deny | index($r)' "$s" >/dev/null \
     && pass "settings: deny $r" || fail "settings: $r not denied"
+done
+for r in 'Read(//**/.env)' 'Edit(//**/.env)'; do
+  jq -e --arg r "$r" '.permissions.ask | index($r)' "$s" >/dev/null \
+    && pass "settings: ask before $r" || fail "settings: $r does not ask"
 done
 for h in SessionStart Stop SessionEnd; do
   jq -e --arg h "$h" '.hooks[$h][0].hooks[0].command | test("claude-memory-sync")' "$s" >/dev/null \

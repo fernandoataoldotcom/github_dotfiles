@@ -98,9 +98,12 @@ session. If the clone is missing, sync is a no-op and memory stays VM-local.
 
 **Keys stay out of the conversation.** The settings deny Claude's `Read` and `Edit`
 tools on `~/.snowflake/**`, where Snowflake private keys live (e.g. for a
-data project's diagnostics tool). Tools that use the keys still work; Claude just can't
-open the files and pull a key into a transcript. This blocks the Read and Edit
-tools only, not a `cat` run through Bash.
+data project's diagnostics tool), and on `~/.ssh/**`; `Read` on
+`~/.claude/.credentials.json` and `~/.git-credentials`; and the Bash commands
+`gh auth token`, `gh auth status -t` and `kubectl get`/`describe` on secrets.
+Reading or editing any `.env` file asks first. Tools that use the keys still work;
+Claude just can't open the files and pull a key into a transcript. The file rules
+block the Read and Edit tools only, not a `cat` run through Bash.
 
 ## Rolling back
 
