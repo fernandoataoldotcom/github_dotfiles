@@ -91,7 +91,7 @@ list_tags() {
 pick_tag() {
   local tags; tags="$(list_tags)"
   if [[ -z "$tags" ]]; then
-    warn "No tags on ${REPO_SLUG} yet -- cut one (git tag v1 && git push --tags) to enable version selection. Installing from 'main'."
+    warn "No tags on ${REPO_SLUG} (or GitHub is unreachable); merging a release-please PR creates one. Installing from 'main'."
     print -r -- "refs/heads/main"; return 0
   fi
   local -a arr=("${(@f)tags}")
