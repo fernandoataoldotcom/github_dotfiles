@@ -109,6 +109,8 @@ notes() {
 # so two VMs recording at once can leave two lines: the newest counts.
 VERSION_FILE="${DIR}/claude-code-version"
 version_check() {
+  # Headless runs (claude -p, schedulers) have no reader: leave the alert for a person.
+  [[ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" == 0 ]] && return 0
   local now seen
   now="$(claude --version 2>/dev/null)"; now="${now%% *}"
   [[ "$now" == [0-9]* ]] || return 0
