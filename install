@@ -151,8 +151,8 @@ backup_one() {                     # copy (not move) existing target into timest
 }
 backup_existing() {
   log "Backing up any existing files to ${BACKUP_DIR}"
-  for f in ~/.tmux.conf ~/.vimrc ~/.config/htop/htoprc ~/.zshrc ~/.claude/settings.json ~/.claude/CLAUDE.md \
-           ~/.local/bin/claude-memory-sync \
+  for f in ~/.tmux.conf ~/.tmux-cheatsheet.txt ~/.vimrc ~/.config/htop/htoprc ~/.zshrc ~/.claude/settings.json ~/.claude/CLAUDE.md \
+           ~/.local/bin/claude-memory-sync ~/.claude/hooks/gitleaks-guard.sh ~/.claude/statusline.sh \
            ~/.oh-my-zsh/custom/fernandoataoldotcom-functions.zsh; do
     backup_one "$f"
   done
@@ -177,6 +177,8 @@ fetch_configs() {
   fetch "${REPO_RAW}/zshrc"               ~/.zshrc
   fetch "${REPO_RAW}/fernandoataoldotcom-functions.zsh" ~/.oh-my-zsh/custom/fernandoataoldotcom-functions.zsh
   fetch "${REPO_RAW}/tmux.conf"           ~/.tmux.conf
+  fetch "${REPO_RAW}/tmux-cheatsheet.txt" ~/.tmux-cheatsheet.txt \
+    || warn "tmux-cheatsheet.txt is not in this ref; prefix ? has nothing to show."
   fetch "${REPO_RAW}/htoprc"              ~/.config/htop/htoprc
   fetch "${REPO_RAW}/vimrc"               ~/.vimrc
   fetch "${REPO_RAW}/claude-settings.json" ~/.claude/settings.json
@@ -188,6 +190,17 @@ fetch_configs() {
     chmod +x ~/.local/bin/claude-memory-sync
   else
     warn "claude-memory-sync is not in this ref; Claude memory sync is unavailable with it."
+  fi
+  # Secret scan before Claude commits or pushes (PreToolUse hook in claude-settings.json).
+  if fetch "${REPO_RAW}/claude-gitleaks-guard" ~/.claude/hooks/gitleaks-guard.sh; then
+    chmod +x ~/.claude/hooks/gitleaks-guard.sh
+  else
+    warn "claude-gitleaks-guard is not in this ref; Claude's commits are not secret-scanned."
+  fi
+  if fetch "${REPO_RAW}/claude-statusline" ~/.claude/statusline.sh; then
+    chmod +x ~/.claude/statusline.sh
+  else
+    warn "claude-statusline is not in this ref; Claude Code shows no status line."
   fi
   fetch "https://raw.githubusercontent.com/junegunn/vim-plug/${VIM_PLUG_REF}/plug.vim" ~/.vim/autoload/plug.vim
 }
@@ -330,10 +343,11 @@ setup_memory() {
     fi
   fi
   mkdir -p "${MEMORY_DIR}/memory"
-  # MEMORY.md is an append-mostly index every VM touches: union-merge it so two
-  # VMs adding lines at once do not conflict.
+  # MEMORY.md is an append-mostly index every VM touches, and claude-code-version is
+  # rewritten by whichever VM updates first: union-merge both so two VMs writing at
+  # once do not conflict.
   if [[ ! -f "${MEMORY_DIR}/.gitattributes" ]]; then
-    print -r -- "MEMORY.md merge=union" > "${MEMORY_DIR}/.gitattributes"
+    print -rl -- "MEMORY.md merge=union" "claude-code-version merge=union" > "${MEMORY_DIR}/.gitattributes"
   fi
   local vis; vis="$(gh repo view "$MEMORY_REPO" --json visibility --jq .visibility 2>/dev/null || true)"
   if [[ -n "$vis" && "$vis" != PRIVATE ]]; then
@@ -384,7 +398,7 @@ post_auth() {
 # ship them), so a line from this means the VM itself is missing something.
 check_deps() {
   local -a missing=(); local c
-  for c in tmux gh jq kubectl vim; do
+  for c in tmux gh jq kubectl vim docker; do
     command -v "$c" >/dev/null 2>&1 || missing+=("$c")
   done
   if command -v tmux >/dev/null 2>&1 && [[ "$(tmux -V 2>/dev/null)" =~ '([0-9]+\.[0-9]+)' ]]; then

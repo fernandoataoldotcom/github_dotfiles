@@ -34,7 +34,8 @@ copied to `~/.dotfiles-backup-<timestamp>/` first.
   (detects moved/tampered tags): `zsh-syntax-highlighting`, `zsh-autosuggestions`,
   `you-should-use`. `git` and `kubectl` are built-in Oh-My-Zsh plugins.
 - Fetches config files for this ref: `zshrc` → `~/.zshrc`, `fernandoataoldotcom-functions.zsh`
-  (custom functions, e.g. `go-rebase`), `tmux.conf`, `vimrc` (+ vim-plug), `htoprc`,
+  (custom functions, e.g. `go-rebase`), `tmux.conf` (+ `tmux-cheatsheet.txt`, shown by
+  prefix `?`), `vimrc` (+ vim-plug), `htoprc`,
   and `claude-settings.json` → `~/.claude/settings.json`.
 - Merges `vscode-machine-settings.json` into the VS Code server's machine settings
   (`~/.vscode-server/data/Machine/settings.json`). Today that only hides the chat
@@ -54,7 +55,7 @@ copied to `~/.dotfiles-backup-<timestamp>/` first.
   (`DOTFILES_NO_EXEC=1` to opt out).
 
 It does **not** install system packages. It expects `tmux` (>=3.2), `gh`, `jq`,
-`kubectl` and `vim`, and prints a warning naming any that are missing; when they
+`kubectl`, `vim` and `docker`, and prints a warning naming any that are missing; when they
 are all there it says nothing.
 
 ## Claude Code
@@ -74,7 +75,12 @@ releases with regressions). For a one-off, `CLAUDE_CHANNEL=latest` or
 `~/.claude-memory/memory`, a clone of a **private** repo (`MEMORY_REPO`, default
 `fernandoataoldotcom/claude-memory`) shared by every VM. Hooks run
 [`claude-memory-sync`](claude-memory-sync): pull at session start, commit + push
-after each turn and at session end. Create the repo once:
+after each turn and at session end. At session start it also compares
+`claude --version` with the newest version any VM has seen (`claude-code-version`
+in the memory repo). The first session on a newer version asks Claude to read the
+changelog since the old one and report only changes that touch this setup (settings
+keys, hooks, permissions, status line, memory, attribution), since a renamed setting
+fails silently. Create the repo once:
 
 ```sh
 gh repo create fernandoataoldotcom/claude-memory --private
@@ -98,9 +104,27 @@ session. If the clone is missing, sync is a no-op and memory stays VM-local.
 
 **Keys stay out of the conversation.** The settings deny Claude's `Read` and `Edit`
 tools on `~/.snowflake/**`, where Snowflake private keys live (e.g. for a
-data project's diagnostics tool). Tools that use the keys still work; Claude just can't
-open the files and pull a key into a transcript. This blocks the Read and Edit
-tools only, not a `cat` run through Bash.
+data project's diagnostics tool), and on `~/.ssh/**`; `Read` on
+`~/.claude/.credentials.json` and `~/.git-credentials`; and the Bash commands
+`gh auth token`, `gh auth status -t` and `kubectl get`/`describe` on secrets.
+Reading or editing any `.env` file asks first. Tools that use the keys still work;
+Claude just can't open the files and pull a key into a transcript. The file rules
+block the Read and Edit tools only, not a `cat` run through Bash.
+
+**Secret scan before Claude commits or pushes.** A `PreToolUse` hook,
+[`claude-gitleaks-guard`](claude-gitleaks-guard) (from venkatamutyala/dotfiles,
+installed as `~/.claude/hooks/gitleaks-guard.sh`), runs pinned gitleaks in Docker
+over what a `git commit` or `git push` would send: staged and unstaged changes to
+tracked files (plus untracked files when the same command runs `git add`), or HEAD,
+branches and tags not on any remote. It blocks the command and names the file and
+rule, never the secret. It reads the command text, so `bash -c`, `xargs` and `sudo`
+wrappers are not followed. The diff goes to gitleaks on stdin, so it works where the Docker daemon
+can't bind-mount the repo. Without Docker, Claude's commits and pushes are blocked.
+It only sees git commands Claude runs, not yours.
+
+**Status line.** [`claude-statusline`](claude-statusline) (from venkatamutyala/dotfiles,
+installed as `~/.claude/statusline.sh`) shows `model | dir (branch) | ctx N%` under
+the prompt, so you can see when the context is filling up.
 
 ## Rolling back
 

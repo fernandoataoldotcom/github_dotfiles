@@ -12,7 +12,8 @@
 # session's context, so nothing is ever written into the project repo.
 #
 #   claude-memory-sync start        pull, then print the notes for the repo in $PWD
-#                                   (or for each repo up to two levels inside $PWD)
+#                                   (or for each repo up to two levels inside $PWD),
+#                                   and flag a Claude Code update no VM has seen yet
 #   claude-memory-sync notes        print the notes only
 #   claude-memory-sync pull         commit local changes, then rebase onto the remote
 #   claude-memory-sync push         commit local changes, rebase, push
@@ -101,6 +102,27 @@ notes() {
   fi
 }
 
+# Claude Code's newest version seen by any VM, shared through the memory repo. On a
+# newer one, ask Claude to check the changelog for changes to our setup (settings,
+# hooks, permissions): a renamed or retired key fails silently. Only moves forward,
+# since VMs auto-update on different days. The file is union-merged (.gitattributes),
+# so two VMs recording at once can leave two lines: the newest counts.
+VERSION_FILE="${DIR}/claude-code-version"
+version_check() {
+  # Headless runs (claude -p, schedulers) have no reader: leave the alert for a person.
+  [[ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" == 0 ]] && return 0
+  local now seen
+  now="$(claude --version 2>/dev/null)"; now="${now%% *}"
+  [[ "$now" == [0-9]* ]] || return 0
+  seen="$(sort -V "$VERSION_FILE" 2>/dev/null | tail -1)"
+  autoload -Uz is-at-least
+  if [[ -n "$seen" ]] && is-at-least "$now" "$seen"; then return 0; fi
+  print -r -- "$now" > "$VERSION_FILE"
+  [[ -n "$seen" ]] || return 0
+  print -r -- ""
+  print -r -- "Claude Code was updated from ${seen} to ${now}, a version no VM had run before. At the start of your first reply, read the changelog entries after ${seen} up to ${now} (https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md) and tell the user, in a few lines, only the changes that affect this setup: settings keys used in ~/.claude/settings.json (renamed, retired, new defaults), hooks, permission rules, the status line, memory and CLAUDE.md loading, and commit or PR attribution. If nothing affects it, say so in one line."
+}
+
 # One sync at a time; a lock left by a crashed run is cleared after 5 minutes.
 locked() {
   [[ -n "$(find "$LOCK" -maxdepth 0 -mmin +5 2>/dev/null)" ]] && rmdir "$LOCK" 2>/dev/null
@@ -113,7 +135,7 @@ locked() {
 
 case "${1:-}" in
   (pull|push) locked "$1" ;;
-  (start)     locked pull; notes ;;
+  (start)     locked pull; notes; version_check ;;
   (notes)     notes ;;
   (push-async)
     if command -v setsid >/dev/null 2>&1; then

@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+#
+# claude-gitleaks-guard | https://github.com/fernandoataoldotcom/github_dotfiles
+# From venkatamutyala/dotfiles v0.6.0 (claude/hooks/gitleaks-guard.sh).
+# Copyright (c) 2023 Venkata Mutyala, MIT License: https://github.com/venkatamutyala/dotfiles/blob/v0.6.0/LICENSE
+# Installed as ~/.claude/hooks/gitleaks-guard.sh and wired in claude-settings.json.
+# gitleaks reads the diff on stdin, so it works where Docker bind mounts don't.
+#
+# PreToolUse(Bash): secret-scan what a `git commit` / `git push` would send out, before the
+# command runs. commit: staged and unstaged changes to tracked files (`commit <path>`,
+# `-a`, `-o` and `-i` take unstaged content), plus untracked files when the same command
+# also runs `git add`. push: HEAD, branches and tags not on any remote.
+# Best effort: it parses the command text, so `bash -c`, `xargs` and `sudo` wrappers
+# are not followed.
+GITLEAKS_IMAGE="ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
+
+input=$(cat)
+maybe_git='git.*(commit|push)'
+# Cheap test on the raw input first, so a VM without jq only loses git commits.
+[[ "$input" =~ $maybe_git ]] || exit 0
+command -v jq >/dev/null 2>&1 || { echo "Blocked: the secret-scan hook needs jq." >&2; exit 2; }
+cmd=$(jq -r '.tool_input.command // empty' <<<"$input")
+[[ "$cmd" =~ $maybe_git ]] || exit 0
+
+unquote() { local s="${1%\"}"; s="${s#\"}"; s="${s%\'}"; s="${s#\'}"; printf '%s' "${s/#\~/$HOME}"; }
+resolve() { if [[ "$2" == /* ]]; then printf '%s' "$2"; else printf '%s/%s' "$1" "$2"; fi; }
+# One key per repo however it was reached (src/.., -C .), so `add` and `commit` meet.
+toplevel() { git -C "$1" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$1"; }
+
+# Walk the command's segments, following cd/pushd and git's -C/--git-dir/--work-tree.
+dir=$(jq -r '.cwd // empty' <<<"$input"); dir="${dir:-$PWD}"
+declare -A scan=()   # repo -> "add" | "commit" | "push" (space-separated)
+while IFS= read -r seg; do
+  seg="${seg#"${seg%%[![:space:]({]*}"}"
+  read -ra w <<<"$seg"
+  # Skip what can come before the command: VAR=x, env/time/then/do..., their options.
+  while (( ${#w[@]} )) && [[ "${w[0]}" =~ ^([A-Za-z_][A-Za-z0-9_]*=.*|-.*|env|time|command|exec|nohup|then|do|else|!)$ ]]; do
+    w=("${w[@]:1}")
+  done
+  case "${w[0]}" in
+    cd|pushd) [[ -n "${w[1]}" ]] && dir=$(resolve "$dir" "$(unquote "${w[1]}")"); continue ;;
+    git|*/git) ;;
+    *) continue ;;
+  esac
+  t="$dir"; i=1
+  while (( i < ${#w[@]} )); do
+    case "${w[i]}" in
+      -C) t=$(resolve "$t" "$(unquote "${w[i+1]}")"); ((i += 2)) ;;
+      -c|--namespace) ((i += 2)) ;;
+      --work-tree=*) t=$(resolve "$dir" "$(unquote "${w[i]#*=}")"); ((i++)) ;;
+      --work-tree) t=$(resolve "$dir" "$(unquote "${w[i+1]}")"); ((i += 2)) ;;
+      --git-dir=*) g=$(unquote "${w[i]#*=}"); t=$(resolve "$dir" "${g%/.git}"); ((i++)) ;;
+      --git-dir) g=$(unquote "${w[i+1]}"); t=$(resolve "$dir" "${g%/.git}"); ((i += 2)) ;;
+      -*) ((i++)) ;;
+      *) break ;;
+    esac
+  done
+  [[ -d "$t" ]] && t=$(toplevel "$t")
+  case "${w[i]}" in
+    add|commit|push) scan[$t]+=" ${w[i]}" ;;
+  esac
+done < <(sed -E 's/(&&|\|\||;|\||&)/\n/g' <<<"$cmd")
+
+for t in "${!scan[@]}"; do
+  kinds="${scan[$t]}"
+  [[ "$kinds" == *commit* || "$kinds" == *push* ]] || continue
+  if [[ "$t" == *'$'* || "$t" == *'`'* || ! -d "$t" ]]; then
+    echo "Blocked: couldn't tell which repo this commits/pushes to ($t). Run git from the repo directory." >&2
+    exit 2
+  fi
+  git -C "$t" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue   # git itself will fail
+  command -v docker >/dev/null 2>&1 || { echo "Blocked: the secret scan needs docker." >&2; exit 2; }
+
+  # Added lines only, keeping "+++ <file>" headers so findings can be traced to a file.
+  stream=$(mktemp); err=$(mktemp); chmod 600 "$stream" "$err"
+  ( cd "$t" || exit
+    if [[ "$kinds" == *commit* ]]; then
+      git diff --no-color --cached
+      git diff --no-color
+      if [[ "$kinds" == *add* ]]; then
+        git ls-files --others --exclude-standard -z | xargs -0 -r -n1 sh -c 'echo "+++ b/$1"; sed "s/^/+/" -- "$1"' _
+      fi
+    fi
+    # With no remote at all (push to a URL), that is the whole history.
+    if [[ "$kinds" == *push* ]]; then
+      git log -p --no-color HEAD --branches --tags --not --remotes 2>/dev/null
+    fi
+  ) | grep '^+' > "$stream"
+
+  report=$(docker run --rm -i --network none "$GITLEAKS_IMAGE" stdin --redact --no-banner \
+             --log-level error --report-format json --report-path - < "$stream" 2>"$err")
+  rc=$?
+  case $rc in
+    0) ;;
+    1) where=$(jq -r '.[] | "\(.StartLine) \(.RuleID)"' <<<"$report" | while read -r line rule; do
+               printf '%s (%s)\n' "$(head -n "$line" "$stream" | grep '^+++ ' | tail -1 | sed 's#^+++ [ab]/##')" "$rule"
+             done | sort -u)
+       printf 'Blocked: gitleaks found secrets in what this would commit/push from %s:\n%s\nDo not open or print these files; tell the user so they can remove the secret.\n' "$t" "$where" >&2
+       rm -f "$stream" "$err"; exit 2 ;;
+    *) printf 'Blocked: the secret scan failed to run in %s (exit %s):\n%s\n' "$t" "$rc" "$(tail -5 "$err")" >&2
+       rm -f "$stream" "$err"; exit 2 ;;
+  esac
+  rm -f "$stream" "$err"
+done
+exit 0

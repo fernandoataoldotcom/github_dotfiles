@@ -116,9 +116,17 @@ done
 ysu_want="$(grep -oE 'YOU_SHOULD_USE_SHA="[0-9a-f]{40}"' "$REPO/install" | grep -oE '[0-9a-f]{40}')"
 [ "$(git -C "$HOME/.oh-my-zsh/custom/plugins/you-should-use" rev-parse HEAD)" = "$ysu_want" ] \
   && pass "you-should-use verified at pinned SHA" || fail "you-should-use SHA mismatch"
-for f in .zshrc .tmux.conf .vimrc .config/htop/htoprc .vim/autoload/plug.vim; do
+for f in .zshrc .tmux.conf .tmux-cheatsheet.txt .vimrc .config/htop/htoprc .vim/autoload/plug.vim; do
   check "installed ~/$f" test -s "$HOME/$f"
 done
+tmux -L cfg -f "$HOME/.tmux.conf" new-session -d 'sleep 30' 2>"$WORK/tmux-cfg.err" \
+  && [ ! -s "$WORK/tmux-cfg.err" ] && pass "tmux.conf loads without errors" || fail "tmux.conf: $(cat "$WORK/tmux-cfg.err")"
+keys="$(tmux -L cfg list-keys -T prefix)"
+grep -q 'prefix *N *command-prompt.*select-pane -T' <<<"$keys" && grep -q -- '-r -T prefix *o ' <<<"$keys" \
+  && grep -q 'prefix *? *display-popup.*tmux-cheatsheet' <<<"$keys" \
+  && pass "tmux: N names a pane, o repeats, ? opens the cheat sheet" || fail "tmux bindings missing"
+[ "$(tmux -L cfg show -gv pane-border-status)" = top ] && pass "tmux: pane titles on the borders" || fail "pane-border-status not top"
+tmux -L cfg kill-server
 zsh -ic 'echo interactive-ok' 2>/dev/null | grep -qx interactive-ok \
   && pass "interactive zsh loads cleanly with the new config" || fail "interactive zsh failed to load"
 
@@ -131,15 +139,30 @@ s="$HOME/.claude/settings.json"
 [ "$(jq -r .autoUpdatesChannel "$s")" = stable ] && pass "settings: autoUpdatesChannel=stable" || fail "autoUpdatesChannel not stable"
 [ "$(jq -r .autoMemoryDirectory "$s")" = '~/.claude-memory/memory' ] && pass "settings: autoMemoryDirectory set" || fail "autoMemoryDirectory wrong"
 [ "$(jq -r 'has("model")' "$s")" = false ] && pass "settings: no pinned model" || fail "settings pin a model"
-for r in 'Read(~/.snowflake/**)' 'Edit(~/.snowflake/**)'; do
+for r in 'Read(~/.snowflake/**)' 'Edit(~/.snowflake/**)' 'Read(~/.ssh/**)' 'Edit(~/.ssh/**)' \
+         'Read(~/.claude/.credentials.json)' 'Read(~/.git-credentials)' 'Bash(gh auth token)' \
+         'Bash(gh auth token *)' 'Bash(kubectl *get *secret*)' 'Bash(kubectl *describe *secret*)'; do
   jq -e --arg r "$r" '.permissions.deny | index($r)' "$s" >/dev/null \
     && pass "settings: deny $r" || fail "settings: $r not denied"
+done
+for r in 'Read(//**/.env)' 'Edit(//**/.env)'; do
+  jq -e --arg r "$r" '.permissions.ask | index($r)' "$s" >/dev/null \
+    && pass "settings: ask before $r" || fail "settings: $r does not ask"
 done
 for h in SessionStart Stop SessionEnd; do
   jq -e --arg h "$h" '.hooks[$h][0].hooks[0].command | test("claude-memory-sync")' "$s" >/dev/null \
     && pass "settings: $h hook runs claude-memory-sync" || fail "$h hook missing"
 done
 check "claude-memory-sync installed and executable" test -x "$HOME/.local/bin/claude-memory-sync"
+jq -e '.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[0].command | test("gitleaks-guard")' "$s" >/dev/null \
+  && pass "settings: PreToolUse(Bash) hook runs the gitleaks guard" || fail "gitleaks PreToolUse hook missing"
+check "gitleaks guard installed and executable" test -x "$HOME/.claude/hooks/gitleaks-guard.sh"
+[ "$(jq -r .statusLine.command "$s")" = '"$HOME/.claude/statusline.sh"' ] && pass "settings: status line wired" || fail "statusLine not wired"
+sl="$WORK/sl-repo"; git init -q -b feat/x "$sl"
+out="$(jq -n --arg d "$sl" '{model: {display_name: "Opus"}, workspace: {current_dir: $d}, context_window: {used_percentage: 42.7}}' | "$HOME/.claude/statusline.sh")"
+[ "$out" = "Opus | sl-repo (feat/x) | ctx 42%" ] && pass "status line: model | dir (branch) | ctx %" || fail "status line printed: $out"
+out="$(jq -n '{model: {display_name: "Opus"}, workspace: {current_dir: "/tmp"}, context_window: {used_percentage: null}}' | "$HOME/.claude/statusline.sh")"
+[ "$out" = "Opus | tmp" ] && pass "status line: no branch or ctx when absent" || fail "status line printed: $out"
 grep -qx '@~/.claude-memory/context/preferences.md' "$HOME/.claude/CLAUDE.md" \
   && pass "personal ~/.claude/CLAUDE.md imports the shared preferences" || fail "~/.claude/CLAUDE.md missing or without the import"
 
@@ -150,6 +173,8 @@ check "memory repo cloned to ~/.claude-memory" test -d "$HOME/.claude-memory/.gi
 check "memory/ directory created" test -d "$HOME/.claude-memory/memory"
 grep -qx 'MEMORY.md merge=union' "$HOME/.claude-memory/.gitattributes" \
   && pass "MEMORY.md is union-merged" || fail ".gitattributes missing"
+grep -qx 'claude-code-version merge=union' "$HOME/.claude-memory/.gitattributes" \
+  && pass "claude-code-version is union-merged" || fail "claude-code-version not union-merged"
 
 note "Dependency check (silent unless something is missing)"
 grep -q 'Missing tools on this VM.*kubectl' "$WORK/install.log" \
@@ -158,6 +183,67 @@ grep 'Missing tools on this VM' "$WORK/install.log" | grep -qE '(: |, )(vim|jq|g
   && fail "reported a tool that is present" || pass "does not report tools that are present"
 grep -q 'Install deps yourself' "$WORK/install.log" \
   && fail "old unconditional deps line is back" || pass "no unconditional deps line"
+
+note "gitleaks guard (PreToolUse hook; docker stubbed)"
+GUARD="$HOME/.claude/hooks/gitleaks-guard.sh"
+gl="$WORK/gl"
+# A fresh repo with one clean commit; the hook runs as if Claude's cwd were $gl.
+fresh() { rm -rf "$gl" "$WORK/gl-remote.git"; git init -q "$gl"; git -C "$gl" config user.email ci@example.com
+          echo base > "$gl/t.txt"; git -C "$gl" add t.txt; git -C "$gl" commit -q -m init; }
+hook() { jq -n --arg c "$1" --arg d "$gl" '{tool_input: {command: $c}, cwd: $d}' | "$GUARD" 2>"$WORK/guard.err"; }
+blocks()  { if hook "$1"; then fail "allowed: $1"; else pass "blocks: $1"; fi; }
+allows()  { if hook "$1"; then pass "allows: $1"; else fail "blocked: $1 ($(cat "$WORK/guard.err"))"; fi; }
+fresh; echo clean > "$gl/clean.txt"; git -C "$gl" add clean.txt
+hook 'git commit -m x' && fail "committed without docker" \
+  || { grep -q 'needs docker' "$WORK/guard.err" && pass "no docker: commit is blocked, not waved through" || fail "no-docker message: $(cat "$WORK/guard.err")"; }
+# Without jq only git commits are blocked, not every Bash command (review finding).
+nojq="$WORK/nojq"; mkdir -p "$nojq"; ln -sf "$(command -v cat)" "$nojq/cat"
+jq -n '{tool_input: {command: "ls -la"}}' | PATH="$nojq" /bin/bash "$GUARD" 2>/dev/null \
+  && pass "no jq: other commands still run" || fail "no jq: blocked a non-git command"
+jq -n '{tool_input: {command: "git commit -m x"}}' | PATH="$nojq" /bin/bash "$GUARD" 2>/dev/null \
+  && fail "no jq: a commit went through unscanned" || pass "no jq: commits are blocked"
+# Stub gitleaks: any added line containing FAKE_SECRET is a finding at that line.
+cat > "$HOME/.local/bin/docker" <<'STUB'
+#!/bin/sh
+n="$(awk '/FAKE_SECRET/ { print NR; exit }')"
+[ -z "$n" ] && { echo '[]'; exit 0; }
+echo "[{\"StartLine\": $n, \"RuleID\": \"fake-rule\"}]"; exit 1
+STUB
+chmod +x "$HOME/.local/bin/docker"
+allows 'ls -la'
+allows 'git commit -m x'
+echo 'token=FAKE_SECRET' > "$gl/leak.txt"
+allows 'git commit -m x'                     # untracked and not added: not committed
+hook 'git add -A && git commit -m x' && fail "git add -A && commit with a secret was allowed" \
+  || { grep -q 'leak.txt (fake-rule)' "$WORK/guard.err" && pass "add + commit: blocked, names the file and rule" || fail "block message: $(cat "$WORK/guard.err")"; }
+mkdir -p "$gl/src"
+blocks 'cd src && git add -A && cd .. && git commit -m x'
+blocks 'git add -A && git -C . commit -m x'
+git -C "$gl" add leak.txt
+blocks "cd /tmp && git -C $gl commit -m x"
+blocks 'true;git commit -m x'
+blocks 'make||git commit -m x'
+blocks '/usr/bin/git commit -m x'
+blocks 'echo msg | git commit -F -'
+blocks 'env GIT_EDITOR=true git commit'
+blocks 'if true; then git commit -m x; fi'
+blocks 'git --git-dir .git --work-tree . commit -m x'
+fresh; echo 'token=FAKE_SECRET' >> "$gl/t.txt"
+blocks 'git commit -m x t.txt'               # unstaged edit committed by path
+blocks 'git commit -am x'
+fresh; git init -q --bare "$WORK/gl-remote.git"; git -C "$gl" remote add origin "$WORK/gl-remote.git"
+git -C "$gl" push -q origin HEAD:main 2>/dev/null
+allows 'git push'
+echo 'token=FAKE_SECRET' > "$gl/leak.txt"; git -C "$gl" add leak.txt; git -C "$gl" commit -q -m leak
+blocks 'git push'
+git -C "$gl" reset -q --hard HEAD~1; git -C "$gl" checkout -q --detach
+echo 'token=FAKE_SECRET' > "$gl/leak.txt"; git -C "$gl" add leak.txt; git -C "$gl" commit -q -m detached
+blocks 'git push origin HEAD:main'          # detached HEAD, not on any branch
+git -C "$gl" tag v1; git -C "$gl" checkout -q -; git -C "$gl" reflog expire --expire=now --all
+blocks 'git push origin v1'                 # tag outside every branch
+fresh; echo 'token=FAKE_SECRET' > "$gl/leak.txt"; git -C "$gl" add leak.txt; git -C "$gl" commit -q -m leak
+blocks "git push $WORK/elsewhere.git main"   # no remote configured, push to a URL
+rm "$HOME/.local/bin/docker"
 
 note "zshrc regressions"
 [ "$(zsh -ic 't -V' 2>/dev/null)" = "$(tmux -V)" ] \
@@ -226,7 +312,7 @@ note "claude-memory-sync: two VMs, one remote"
 SYNC="$HOME/.local/bin/claude-memory-sync"
 A="$HOME/.claude-memory"; B="$WORK/vmB"
 git clone -q "$FAKE_MEMORY_REMOTE" "$B" 2>/dev/null; mkdir -p "$B/memory"
-echo 'MEMORY.md merge=union' > "$B/.gitattributes"
+cp "$A/.gitattributes" "$B/.gitattributes"
 echo '- a' > "$A/memory/MEMORY.md"; echo a > "$A/memory/a.md"
 CLAUDE_MEMORY_DIR="$A" "$SYNC" push
 [ "$(git -C "$FAKE_MEMORY_REMOTE" rev-list --count main)" = 1 ] \
@@ -243,6 +329,31 @@ for _ in $(seq 20); do git -C "$FAKE_MEMORY_REMOTE" cat-file -e main:memory/c.md
 git -C "$FAKE_MEMORY_REMOTE" cat-file -e main:memory/c.md 2>/dev/null \
   && pass "push-async pushes in the background" || fail "push-async did not push"
 [ -z "$(CLAUDE_MEMORY_DIR="$WORK/absent" "$SYNC" start)" ] && pass "no clone: silent no-op" || fail "printed without a clone"
+
+note "claude-memory-sync: Claude Code version check"
+vbin="$WORK/vbin"; mkdir -p "$vbin" "$WORK/novcs"
+printf '#!/bin/sh\necho "$FAKE_CLAUDE_VERSION (Claude Code)"\n' > "$vbin/claude"; chmod +x "$vbin/claude"
+vstart() { (cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION="$1" CLAUDE_MEMORY_DIR="$A" "$SYNC" start); }
+rm -f "$A/claude-code-version"
+[ -z "$(vstart 2.1.300)" ] && [ "$(cat "$A/claude-code-version")" = 2.1.300 ] \
+  && pass "first run records the version silently" || fail "first run: $(cat "$A/claude-code-version" 2>/dev/null)"
+[ -z "$(vstart 2.1.300)" ] && pass "same version: silent" || fail "same version printed"
+out="$(vstart 2.1.310)"
+grep -q 'updated from 2.1.300 to 2.1.310' <<<"$out" && [ "$(cat "$A/claude-code-version")" = 2.1.310 ] \
+  && pass "newer version: asks for a changelog check and records it" || fail "newer version: $out"
+[ -z "$(vstart 2.1.305)" ] && [ "$(cat "$A/claude-code-version")" = 2.1.310 ] \
+  && pass "older version (a VM not yet updated): silent, keeps the newest" || fail "older version changed the record"
+[ -z "$(vstart 2.1.310)" ] && pass "after reporting, silent again" || fail "reported the same update twice"
+out="$(cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.315 CLAUDE_CODE_SESSION_ATTENDED=0 CLAUDE_MEMORY_DIR="$A" "$SYNC" start)"
+[ -z "$out" ] && [ "$(cat "$A/claude-code-version")" = 2.1.310 ] \
+  && pass "headless session (claude -p): no alert, version left for a person" || fail "headless run consumed the alert: $out"
+CLAUDE_MEMORY_DIR="$A" "$SYNC" push; CLAUDE_MEMORY_DIR="$B" "$SYNC" pull
+(cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.320 CLAUDE_MEMORY_DIR="$A" "$SYNC" start >/dev/null)
+(cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.330 CLAUDE_MEMORY_DIR="$B" "$SYNC" start >/dev/null)
+CLAUDE_MEMORY_DIR="$A" "$SYNC" push; CLAUDE_MEMORY_DIR="$B" "$SYNC" push
+[ "$(git -C "$B" rev-list --count '@{u}..HEAD')" = 0 ] && ! git -C "$B" status --porcelain | grep -q . \
+  && pass "two VMs recording different versions at once: no conflict, both pushed" || fail "version file conflict blocked the push"
+[ -z "$(vstart 2.1.330)" ] && pass "after the merge, the newest version (2.1.330) counts" || fail "merged version file misread: $(cat "$A/claude-code-version")"
 
 note "claude-memory-sync: project notes"
 ws="$WORK/ws"

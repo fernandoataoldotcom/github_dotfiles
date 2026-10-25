@@ -6,11 +6,27 @@
   "theme": "dark",
   "autoUpdatesChannel": "stable",
   "autoMemoryDirectory": "~/.claude-memory/memory",
+  "statusLine": { "type": "command", "command": "\"$HOME/.claude/statusline.sh\"" },
   "permissions": {
     "allow": [],
-    "deny": ["Read(~/.snowflake/**)", "Edit(~/.snowflake/**)"]
+    "ask": ["Read(//**/.env)", "Edit(//**/.env)"],
+    "deny": [
+      "Read(~/.snowflake/**)", "Edit(~/.snowflake/**)",
+      "Read(~/.ssh/**)", "Edit(~/.ssh/**)",
+      "Read(~/.claude/.credentials.json)", "Read(~/.git-credentials)",
+      "Bash(gh auth token)", "Bash(gh auth token *)", "Bash(gh auth status *-t*)",
+      "Bash(kubectl *get *secret*)", "Bash(kubectl *describe *secret*)"
+    ]
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.claude/hooks/gitleaks-guard.sh\"", "timeout": 300 }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [

@@ -1,0 +1,40 @@
+tmux cheat sheet                                    q closes this
+Press the prefix Ctrl-b, let go, then the key.
+
+PANES
+  \          split side by side
+  -          split top / bottom
+  h j k l    go left / down / up / right
+  o          next pane; keep tapping o to cycle
+  z          zoom this pane (again to unzoom)
+  N          name this pane (shown on its top border)
+  { }        swap with the previous / next pane
+  Space      next layout
+  x          close this pane
+
+WINDOWS (tabs along the bottom)
+  c          new window
+  n p        next / previous window
+  0-9        go to window number
+  ,          rename window
+  w          pick a window from a tree
+  &          close window
+
+SESSIONS (name shows bottom-left)
+  d          detach; it keeps running
+  $          rename session
+  s          pick a session
+  ( )        previous / next session
+
+SCROLL
+  [          scroll mode: arrows, PgUp/PgDn; q leaves
+
+OTHER
+  ?          this sheet
+  :          command prompt (:list-keys shows every binding)
+
+FROM THE SHELL (t = tmux)
+  t ls               list sessions
+  t new -s NAME      new session called NAME
+  t a -t NAME        attach to NAME
+  tmux source-file ~/.tmux.conf    reload after editing
