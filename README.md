@@ -171,11 +171,17 @@ VM.
 
 ## Versioning
 
-New VMs install the newest tag, so a merge reaches them only once it is tagged:
-
-```sh
-git tag v1 && git push --tags
-```
+New VMs install the newest tag, so a merge reaches them only once it is tagged.
+[release-please](.github/workflows/release-please.yml) does the tagging: after each
+merge to `main` it opens or updates a release PR that bumps the version from the
+[Conventional Commits](https://www.conventionalcommits.org/) since the last release
+(`feat` → minor, `fix` → patch, `feat!`/`BREAKING CHANGE` → major; `docs`, `test`,
+`ci`, `chore` alone don't release) and updates `CHANGELOG.md`. Merging that PR tags
+`vX.Y.Z` and publishes a GitHub Release, which is when VMs get it. Don't tag by hand.
+Repo setting it needs: Settings → Actions → General → "Allow GitHub Actions to
+create and approve pull requests". Release PRs don't run CI (GitHub doesn't trigger
+workflows from its own token), but they only change `CHANGELOG.md`,
+`version.txt` and the manifest, and `main` was tested on merge.
 
 ## Security notes
 
