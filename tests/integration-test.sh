@@ -146,6 +146,9 @@ for h in SessionStart Stop SessionEnd; do
     && pass "settings: $h hook runs claude-memory-sync" || fail "$h hook missing"
 done
 check "claude-memory-sync installed and executable" test -x "$HOME/.local/bin/claude-memory-sync"
+jq -e '.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[0].command | test("gitleaks-guard")' "$s" >/dev/null \
+  && pass "settings: PreToolUse(Bash) hook runs the gitleaks guard" || fail "gitleaks PreToolUse hook missing"
+check "gitleaks guard installed and executable" test -x "$HOME/.claude/hooks/gitleaks-guard.sh"
 grep -qx '@~/.claude-memory/context/preferences.md' "$HOME/.claude/CLAUDE.md" \
   && pass "personal ~/.claude/CLAUDE.md imports the shared preferences" || fail "~/.claude/CLAUDE.md missing or without the import"
 
@@ -164,6 +167,34 @@ grep 'Missing tools on this VM' "$WORK/install.log" | grep -qE '(: |, )(vim|jq|g
   && fail "reported a tool that is present" || pass "does not report tools that are present"
 grep -q 'Install deps yourself' "$WORK/install.log" \
   && fail "old unconditional deps line is back" || pass "no unconditional deps line"
+
+note "gitleaks guard (PreToolUse hook; docker stubbed)"
+GUARD="$HOME/.claude/hooks/gitleaks-guard.sh"
+gl="$WORK/gl"; git init -q "$gl"; git -C "$gl" config user.email ci@example.com
+git -C "$gl" commit -q --allow-empty -m init
+hook() { jq -n --arg c "$1" --arg d "$gl" '{tool_input: {command: $c}, cwd: $d}' | "$GUARD" 2>"$WORK/guard.err"; }
+echo clean > "$gl/clean.txt"; git -C "$gl" add clean.txt
+hook 'git commit -m x' && fail "committed without docker" \
+  || { grep -q 'needs docker' "$WORK/guard.err" && pass "no docker: commit is blocked, not waved through" || fail "no-docker message: $(cat "$WORK/guard.err")"; }
+# Stub gitleaks: any added line containing FAKE_SECRET is a finding at that line.
+cat > "$HOME/.local/bin/docker" <<'STUB'
+#!/bin/sh
+n="$(awk '/FAKE_SECRET/ { print NR; exit }')"
+[ -z "$n" ] && { echo '[]'; exit 0; }
+echo "[{\"StartLine\": $n, \"RuleID\": \"fake-rule\"}]"; exit 1
+STUB
+chmod +x "$HOME/.local/bin/docker"
+hook 'ls -la' && pass "non-git commands pass" || fail "blocked a non-git command"
+hook 'git commit -m x' && pass "clean staged change: commit allowed" || fail "blocked a clean commit: $(cat "$WORK/guard.err")"
+echo 'token=FAKE_SECRET' > "$gl/leak.txt"
+hook 'git commit -m x' && pass "untracked file not scanned by a plain commit" || fail "plain commit scanned an untracked file"
+hook 'git add -A && git commit -m x' && fail "git add -A && commit with a secret was allowed" \
+  || { grep -q 'leak.txt (fake-rule)' "$WORK/guard.err" && pass "add + commit: blocked, names the file and rule" || fail "block message: $(cat "$WORK/guard.err")"; }
+git -C "$gl" add leak.txt
+hook "cd /tmp && git -C $gl commit -m x" && fail "git -C <repo> commit with a staged secret was allowed" || pass "follows cd and git -C to the right repo"
+git -C "$gl" commit -q -m leak; git -C "$gl" remote add origin "$WORK/gl-remote.git"
+hook 'git push' && fail "push of an unpushed secret was allowed" || pass "push: unpushed commits are scanned"
+rm "$HOME/.local/bin/docker"
 
 note "zshrc regressions"
 [ "$(zsh -ic 't -V' 2>/dev/null)" = "$(tmux -V)" ] \

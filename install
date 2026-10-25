@@ -152,7 +152,7 @@ backup_one() {                     # copy (not move) existing target into timest
 backup_existing() {
   log "Backing up any existing files to ${BACKUP_DIR}"
   for f in ~/.tmux.conf ~/.vimrc ~/.config/htop/htoprc ~/.zshrc ~/.claude/settings.json ~/.claude/CLAUDE.md \
-           ~/.local/bin/claude-memory-sync \
+           ~/.local/bin/claude-memory-sync ~/.claude/hooks/gitleaks-guard.sh \
            ~/.oh-my-zsh/custom/fernandoataoldotcom-functions.zsh; do
     backup_one "$f"
   done
@@ -188,6 +188,12 @@ fetch_configs() {
     chmod +x ~/.local/bin/claude-memory-sync
   else
     warn "claude-memory-sync is not in this ref; Claude memory sync is unavailable with it."
+  fi
+  # Secret scan before Claude commits or pushes (PreToolUse hook in claude-settings.json).
+  if fetch "${REPO_RAW}/claude-gitleaks-guard" ~/.claude/hooks/gitleaks-guard.sh; then
+    chmod +x ~/.claude/hooks/gitleaks-guard.sh
+  else
+    warn "claude-gitleaks-guard is not in this ref; Claude's commits are not secret-scanned."
   fi
   fetch "https://raw.githubusercontent.com/junegunn/vim-plug/${VIM_PLUG_REF}/plug.vim" ~/.vim/autoload/plug.vim
 }
@@ -384,7 +390,7 @@ post_auth() {
 # ship them), so a line from this means the VM itself is missing something.
 check_deps() {
   local -a missing=(); local c
-  for c in tmux gh jq kubectl vim; do
+  for c in tmux gh jq kubectl vim docker; do
     command -v "$c" >/dev/null 2>&1 || missing+=("$c")
   done
   if command -v tmux >/dev/null 2>&1 && [[ "$(tmux -V 2>/dev/null)" =~ '([0-9]+\.[0-9]+)' ]]; then

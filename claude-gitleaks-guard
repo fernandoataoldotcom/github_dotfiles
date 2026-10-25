@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+#
+# claude-gitleaks-guard | https://github.com/fernandoataoldotcom/github_dotfiles
+# From venkatamutyala/dotfiles v0.6.0 (claude/hooks/gitleaks-guard.sh).
+# Copyright (c) 2023 Venkata Mutyala, MIT License: https://github.com/venkatamutyala/dotfiles/blob/v0.6.0/LICENSE
+# Installed as ~/.claude/hooks/gitleaks-guard.sh and wired in claude-settings.json.
+# gitleaks reads the diff on stdin, so it works where Docker bind mounts don't.
+#
+# PreToolUse(Bash): secret-scan what a `git commit` / `git push` would send out, before the
+# command runs. commit: staged changes, plus unstaged and untracked files when the same
+# command also runs `git add` or `commit -a`. push: local commits not on any remote.
+GITLEAKS_IMAGE="ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
+
+command -v jq >/dev/null 2>&1 || { echo "Blocked: the secret-scan hook needs jq." >&2; exit 2; }
+input=$(cat)
+cmd=$(jq -r '.tool_input.command // empty' <<<"$input")
+maybe_git='(^|[[:space:](])git[[:space:]].*(commit|push)'
+[[ "$cmd" =~ $maybe_git ]] || exit 0
+
+unquote() { local s="${1%\"}"; s="${s#\"}"; s="${s%\'}"; s="${s#\'}"; printf '%s' "${s/#\~/$HOME}"; }
+resolve() { if [[ "$2" == /* ]]; then printf '%s' "$2"; else printf '%s/%s' "$1" "$2"; fi; }
+
+# Walk the command's segments, following cd/pushd and git's -C/--git-dir/--work-tree.
+dir=$(jq -r '.cwd // empty' <<<"$input"); dir="${dir:-$PWD}"
+declare -A scan=()   # repo -> "staged" | "all" | "push" (space-separated)
+while IFS= read -r seg; do
+  seg="${seg#"${seg%%[![:space:]({]*}"}"
+  read -ra w <<<"$seg"
+  while [[ "${w[0]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do w=("${w[@]:1}"); done
+  case "${w[0]}" in
+    cd|pushd) [[ -n "${w[1]}" ]] && dir=$(resolve "$dir" "$(unquote "${w[1]}")"); continue ;;
+    git) ;;
+    *) continue ;;
+  esac
+  t="$dir"; i=1
+  while (( i < ${#w[@]} )); do
+    case "${w[i]}" in
+      -C) t=$(resolve "$t" "$(unquote "${w[i+1]}")"); ((i += 2)) ;;
+      -c) ((i += 2)) ;;
+      --work-tree=*) t=$(resolve "$dir" "$(unquote "${w[i]#*=}")"); ((i++)) ;;
+      --git-dir=*) g=$(unquote "${w[i]#*=}"); t=$(resolve "$dir" "${g%/.git}"); ((i++)) ;;
+      -*) ((i++)) ;;
+      *) break ;;
+    esac
+  done
+  case "${w[i]}" in
+    add) scan[$t]+=" add" ;;
+    commit) scan[$t]+=" staged"
+            for x in "${w[@]:i+1}"; do [[ "$x" =~ ^(--all|-[A-Za-z]*a[A-Za-z]*)$ ]] && scan[$t]+=" all"; done ;;
+    push) scan[$t]+=" push" ;;
+  esac
+done < <(sed -E 's/(&&|\|\||;)/\n/g' <<<"$cmd")
+
+for t in "${!scan[@]}"; do
+  kinds="${scan[$t]}"
+  [[ "$kinds" == *staged* || "$kinds" == *push* ]] || continue
+  if [[ "$t" == *'$'* || "$t" == *'`'* || ! -d "$t" ]]; then
+    echo "Blocked: couldn't tell which repo this commits/pushes to ($t). Run git from the repo directory." >&2
+    exit 2
+  fi
+  git -C "$t" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue   # git itself will fail
+  command -v docker >/dev/null 2>&1 || { echo "Blocked: the secret scan needs docker." >&2; exit 2; }
+
+  # Added lines only, keeping "+++ <file>" headers so findings can be traced to a file.
+  stream=$(mktemp); err=$(mktemp); chmod 600 "$stream" "$err"
+  ( cd "$t" || exit
+    if [[ "$kinds" == *staged* ]]; then
+      git diff --no-color --cached
+      if [[ "$kinds" == *all* || "$kinds" == *add* ]]; then
+        git diff --no-color
+        git ls-files --others --exclude-standard -z | xargs -0 -r -n1 sh -c 'echo "+++ b/$1"; sed "s/^/+/" -- "$1"' _
+      fi
+    fi
+    if [[ "$kinds" == *push* && -n "$(git remote)" ]]; then
+      git log -p --no-color --branches --not --remotes
+    fi
+  ) | grep '^+' > "$stream"
+
+  report=$(docker run --rm -i --network none "$GITLEAKS_IMAGE" stdin --redact --no-banner \
+             --log-level error --report-format json --report-path - < "$stream" 2>"$err")
+  rc=$?
+  case $rc in
+    0) ;;
+    1) where=$(jq -r '.[] | "\(.StartLine) \(.RuleID)"' <<<"$report" | while read -r line rule; do
+               printf '%s (%s)\n' "$(head -n "$line" "$stream" | grep '^+++ ' | tail -1 | sed 's#^+++ [ab]/##')" "$rule"
+             done | sort -u)
+       printf 'Blocked: gitleaks found secrets in what this would commit/push from %s:\n%s\nDo not open or print these files; tell the user so they can remove the secret.\n' "$t" "$where" >&2
+       rm -f "$stream" "$err"; exit 2 ;;
+    *) printf 'Blocked: the secret scan failed to run in %s (exit %s):\n%s\n' "$t" "$rc" "$(tail -5 "$err")" >&2
+       rm -f "$stream" "$err"; exit 2 ;;
+  esac
+  rm -f "$stream" "$err"
+done
+exit 0

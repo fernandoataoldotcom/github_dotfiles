@@ -54,7 +54,7 @@ copied to `~/.dotfiles-backup-<timestamp>/` first.
   (`DOTFILES_NO_EXEC=1` to opt out).
 
 It does **not** install system packages. It expects `tmux` (>=3.2), `gh`, `jq`,
-`kubectl` and `vim`, and prints a warning naming any that are missing; when they
+`kubectl`, `vim` and `docker`, and prints a warning naming any that are missing; when they
 are all there it says nothing.
 
 ## Claude Code
@@ -104,6 +104,16 @@ data project's diagnostics tool), and on `~/.ssh/**`; `Read` on
 Reading or editing any `.env` file asks first. Tools that use the keys still work;
 Claude just can't open the files and pull a key into a transcript. The file rules
 block the Read and Edit tools only, not a `cat` run through Bash.
+
+**Secret scan before Claude commits or pushes.** A `PreToolUse` hook,
+[`claude-gitleaks-guard`](claude-gitleaks-guard) (from venkatamutyala/dotfiles,
+installed as `~/.claude/hooks/gitleaks-guard.sh`), runs pinned gitleaks in Docker
+over what a `git commit` or `git push` would send: staged changes (plus unstaged and
+untracked files when the same command runs `git add` or `commit -a`), or local
+commits not on any remote. It blocks the command and names the file and rule, never
+the secret. The diff goes to gitleaks on stdin, so it works where the Docker daemon
+can't bind-mount the repo. Without Docker, Claude's commits and pushes are blocked.
+It only sees git commands Claude runs, not yours.
 
 ## Rolling back
 
