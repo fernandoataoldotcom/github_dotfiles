@@ -341,10 +341,11 @@ setup_memory() {
     fi
   fi
   mkdir -p "${MEMORY_DIR}/memory"
-  # MEMORY.md is an append-mostly index every VM touches: union-merge it so two
-  # VMs adding lines at once do not conflict.
+  # MEMORY.md is an append-mostly index every VM touches, and claude-code-version is
+  # rewritten by whichever VM updates first: union-merge both so two VMs writing at
+  # once do not conflict.
   if [[ ! -f "${MEMORY_DIR}/.gitattributes" ]]; then
-    print -r -- "MEMORY.md merge=union" > "${MEMORY_DIR}/.gitattributes"
+    print -rl -- "MEMORY.md merge=union" "claude-code-version merge=union" > "${MEMORY_DIR}/.gitattributes"
   fi
   local vis; vis="$(gh repo view "$MEMORY_REPO" --json visibility --jq .visibility 2>/dev/null || true)"
   if [[ -n "$vis" && "$vis" != PRIVATE ]]; then

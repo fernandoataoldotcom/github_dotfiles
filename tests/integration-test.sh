@@ -165,6 +165,8 @@ check "memory repo cloned to ~/.claude-memory" test -d "$HOME/.claude-memory/.gi
 check "memory/ directory created" test -d "$HOME/.claude-memory/memory"
 grep -qx 'MEMORY.md merge=union' "$HOME/.claude-memory/.gitattributes" \
   && pass "MEMORY.md is union-merged" || fail ".gitattributes missing"
+grep -qx 'claude-code-version merge=union' "$HOME/.claude-memory/.gitattributes" \
+  && pass "claude-code-version is union-merged" || fail "claude-code-version not union-merged"
 
 note "Dependency check (silent unless something is missing)"
 grep -q 'Missing tools on this VM.*kubectl' "$WORK/install.log" \
@@ -269,7 +271,7 @@ note "claude-memory-sync: two VMs, one remote"
 SYNC="$HOME/.local/bin/claude-memory-sync"
 A="$HOME/.claude-memory"; B="$WORK/vmB"
 git clone -q "$FAKE_MEMORY_REMOTE" "$B" 2>/dev/null; mkdir -p "$B/memory"
-echo 'MEMORY.md merge=union' > "$B/.gitattributes"
+cp "$A/.gitattributes" "$B/.gitattributes"
 echo '- a' > "$A/memory/MEMORY.md"; echo a > "$A/memory/a.md"
 CLAUDE_MEMORY_DIR="$A" "$SYNC" push
 [ "$(git -C "$FAKE_MEMORY_REMOTE" rev-list --count main)" = 1 ] \
@@ -286,6 +288,28 @@ for _ in $(seq 20); do git -C "$FAKE_MEMORY_REMOTE" cat-file -e main:memory/c.md
 git -C "$FAKE_MEMORY_REMOTE" cat-file -e main:memory/c.md 2>/dev/null \
   && pass "push-async pushes in the background" || fail "push-async did not push"
 [ -z "$(CLAUDE_MEMORY_DIR="$WORK/absent" "$SYNC" start)" ] && pass "no clone: silent no-op" || fail "printed without a clone"
+
+note "claude-memory-sync: Claude Code version check"
+vbin="$WORK/vbin"; mkdir -p "$vbin" "$WORK/novcs"
+printf '#!/bin/sh\necho "$FAKE_CLAUDE_VERSION (Claude Code)"\n' > "$vbin/claude"; chmod +x "$vbin/claude"
+vstart() { (cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION="$1" CLAUDE_MEMORY_DIR="$A" "$SYNC" start); }
+rm -f "$A/claude-code-version"
+[ -z "$(vstart 2.1.300)" ] && [ "$(cat "$A/claude-code-version")" = 2.1.300 ] \
+  && pass "first run records the version silently" || fail "first run: $(cat "$A/claude-code-version" 2>/dev/null)"
+[ -z "$(vstart 2.1.300)" ] && pass "same version: silent" || fail "same version printed"
+out="$(vstart 2.1.310)"
+grep -q 'updated from 2.1.300 to 2.1.310' <<<"$out" && [ "$(cat "$A/claude-code-version")" = 2.1.310 ] \
+  && pass "newer version: asks for a changelog check and records it" || fail "newer version: $out"
+[ -z "$(vstart 2.1.305)" ] && [ "$(cat "$A/claude-code-version")" = 2.1.310 ] \
+  && pass "older version (a VM not yet updated): silent, keeps the newest" || fail "older version changed the record"
+[ -z "$(vstart 2.1.310)" ] && pass "after reporting, silent again" || fail "reported the same update twice"
+CLAUDE_MEMORY_DIR="$A" "$SYNC" push; CLAUDE_MEMORY_DIR="$B" "$SYNC" pull
+(cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.320 CLAUDE_MEMORY_DIR="$A" "$SYNC" start >/dev/null)
+(cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.330 CLAUDE_MEMORY_DIR="$B" "$SYNC" start >/dev/null)
+CLAUDE_MEMORY_DIR="$A" "$SYNC" push; CLAUDE_MEMORY_DIR="$B" "$SYNC" push
+[ "$(git -C "$B" rev-list --count '@{u}..HEAD')" = 0 ] && ! git -C "$B" status --porcelain | grep -q . \
+  && pass "two VMs recording different versions at once: no conflict, both pushed" || fail "version file conflict blocked the push"
+[ -z "$(vstart 2.1.330)" ] && pass "after the merge, the newest version (2.1.330) counts" || fail "merged version file misread: $(cat "$A/claude-code-version")"
 
 note "claude-memory-sync: project notes"
 ws="$WORK/ws"
