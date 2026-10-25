@@ -114,10 +114,11 @@ block the Read and Edit tools only, not a `cat` run through Bash.
 **Secret scan before Claude commits or pushes.** A `PreToolUse` hook,
 [`claude-gitleaks-guard`](claude-gitleaks-guard) (from venkatamutyala/dotfiles,
 installed as `~/.claude/hooks/gitleaks-guard.sh`), runs pinned gitleaks in Docker
-over what a `git commit` or `git push` would send: staged changes (plus unstaged and
-untracked files when the same command runs `git add` or `commit -a`), or local
-commits not on any remote. It blocks the command and names the file and rule, never
-the secret. The diff goes to gitleaks on stdin, so it works where the Docker daemon
+over what a `git commit` or `git push` would send: staged and unstaged changes to
+tracked files (plus untracked files when the same command runs `git add`), or HEAD,
+branches and tags not on any remote. It blocks the command and names the file and
+rule, never the secret. It reads the command text, so `bash -c`, `xargs` and `sudo`
+wrappers are not followed. The diff goes to gitleaks on stdin, so it works where the Docker daemon
 can't bind-mount the repo. Without Docker, Claude's commits and pushes are blocked.
 It only sees git commands Claude runs, not yours.
 

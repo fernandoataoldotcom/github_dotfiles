@@ -186,12 +186,22 @@ grep -q 'Install deps yourself' "$WORK/install.log" \
 
 note "gitleaks guard (PreToolUse hook; docker stubbed)"
 GUARD="$HOME/.claude/hooks/gitleaks-guard.sh"
-gl="$WORK/gl"; git init -q "$gl"; git -C "$gl" config user.email ci@example.com
-git -C "$gl" commit -q --allow-empty -m init
+gl="$WORK/gl"
+# A fresh repo with one clean commit; the hook runs as if Claude's cwd were $gl.
+fresh() { rm -rf "$gl" "$WORK/gl-remote.git"; git init -q "$gl"; git -C "$gl" config user.email ci@example.com
+          echo base > "$gl/t.txt"; git -C "$gl" add t.txt; git -C "$gl" commit -q -m init; }
 hook() { jq -n --arg c "$1" --arg d "$gl" '{tool_input: {command: $c}, cwd: $d}' | "$GUARD" 2>"$WORK/guard.err"; }
-echo clean > "$gl/clean.txt"; git -C "$gl" add clean.txt
+blocks()  { if hook "$1"; then fail "allowed: $1"; else pass "blocks: $1"; fi; }
+allows()  { if hook "$1"; then pass "allows: $1"; else fail "blocked: $1 ($(cat "$WORK/guard.err"))"; fi; }
+fresh; echo clean > "$gl/clean.txt"; git -C "$gl" add clean.txt
 hook 'git commit -m x' && fail "committed without docker" \
   || { grep -q 'needs docker' "$WORK/guard.err" && pass "no docker: commit is blocked, not waved through" || fail "no-docker message: $(cat "$WORK/guard.err")"; }
+# Without jq only git commits are blocked, not every Bash command (review finding).
+nojq="$WORK/nojq"; mkdir -p "$nojq"; ln -sf "$(command -v cat)" "$nojq/cat"
+jq -n '{tool_input: {command: "ls -la"}}' | PATH="$nojq" /bin/bash "$GUARD" 2>/dev/null \
+  && pass "no jq: other commands still run" || fail "no jq: blocked a non-git command"
+jq -n '{tool_input: {command: "git commit -m x"}}' | PATH="$nojq" /bin/bash "$GUARD" 2>/dev/null \
+  && fail "no jq: a commit went through unscanned" || pass "no jq: commits are blocked"
 # Stub gitleaks: any added line containing FAKE_SECRET is a finding at that line.
 cat > "$HOME/.local/bin/docker" <<'STUB'
 #!/bin/sh
@@ -200,16 +210,39 @@ n="$(awk '/FAKE_SECRET/ { print NR; exit }')"
 echo "[{\"StartLine\": $n, \"RuleID\": \"fake-rule\"}]"; exit 1
 STUB
 chmod +x "$HOME/.local/bin/docker"
-hook 'ls -la' && pass "non-git commands pass" || fail "blocked a non-git command"
-hook 'git commit -m x' && pass "clean staged change: commit allowed" || fail "blocked a clean commit: $(cat "$WORK/guard.err")"
+allows 'ls -la'
+allows 'git commit -m x'
 echo 'token=FAKE_SECRET' > "$gl/leak.txt"
-hook 'git commit -m x' && pass "untracked file not scanned by a plain commit" || fail "plain commit scanned an untracked file"
+allows 'git commit -m x'                     # untracked and not added: not committed
 hook 'git add -A && git commit -m x' && fail "git add -A && commit with a secret was allowed" \
   || { grep -q 'leak.txt (fake-rule)' "$WORK/guard.err" && pass "add + commit: blocked, names the file and rule" || fail "block message: $(cat "$WORK/guard.err")"; }
+mkdir -p "$gl/src"
+blocks 'cd src && git add -A && cd .. && git commit -m x'
+blocks 'git add -A && git -C . commit -m x'
 git -C "$gl" add leak.txt
-hook "cd /tmp && git -C $gl commit -m x" && fail "git -C <repo> commit with a staged secret was allowed" || pass "follows cd and git -C to the right repo"
-git -C "$gl" commit -q -m leak; git -C "$gl" remote add origin "$WORK/gl-remote.git"
-hook 'git push' && fail "push of an unpushed secret was allowed" || pass "push: unpushed commits are scanned"
+blocks "cd /tmp && git -C $gl commit -m x"
+blocks 'true;git commit -m x'
+blocks 'make||git commit -m x'
+blocks '/usr/bin/git commit -m x'
+blocks 'echo msg | git commit -F -'
+blocks 'env GIT_EDITOR=true git commit'
+blocks 'if true; then git commit -m x; fi'
+blocks 'git --git-dir .git --work-tree . commit -m x'
+fresh; echo 'token=FAKE_SECRET' >> "$gl/t.txt"
+blocks 'git commit -m x t.txt'               # unstaged edit committed by path
+blocks 'git commit -am x'
+fresh; git init -q --bare "$WORK/gl-remote.git"; git -C "$gl" remote add origin "$WORK/gl-remote.git"
+git -C "$gl" push -q origin HEAD:main 2>/dev/null
+allows 'git push'
+echo 'token=FAKE_SECRET' > "$gl/leak.txt"; git -C "$gl" add leak.txt; git -C "$gl" commit -q -m leak
+blocks 'git push'
+git -C "$gl" reset -q --hard HEAD~1; git -C "$gl" checkout -q --detach
+echo 'token=FAKE_SECRET' > "$gl/leak.txt"; git -C "$gl" add leak.txt; git -C "$gl" commit -q -m detached
+blocks 'git push origin HEAD:main'          # detached HEAD, not on any branch
+git -C "$gl" tag v1; git -C "$gl" checkout -q -; git -C "$gl" reflog expire --expire=now --all
+blocks 'git push origin v1'                 # tag outside every branch
+fresh; echo 'token=FAKE_SECRET' > "$gl/leak.txt"; git -C "$gl" add leak.txt; git -C "$gl" commit -q -m leak
+blocks "git push $WORK/elsewhere.git main"   # no remote configured, push to a URL
 rm "$HOME/.local/bin/docker"
 
 note "zshrc regressions"
@@ -311,6 +344,9 @@ grep -q 'updated from 2.1.300 to 2.1.310' <<<"$out" && [ "$(cat "$A/claude-code-
 [ -z "$(vstart 2.1.305)" ] && [ "$(cat "$A/claude-code-version")" = 2.1.310 ] \
   && pass "older version (a VM not yet updated): silent, keeps the newest" || fail "older version changed the record"
 [ -z "$(vstart 2.1.310)" ] && pass "after reporting, silent again" || fail "reported the same update twice"
+out="$(cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.315 CLAUDE_CODE_SESSION_ATTENDED=0 CLAUDE_MEMORY_DIR="$A" "$SYNC" start)"
+[ -z "$out" ] && [ "$(cat "$A/claude-code-version")" = 2.1.310 ] \
+  && pass "headless session (claude -p): no alert, version left for a person" || fail "headless run consumed the alert: $out"
 CLAUDE_MEMORY_DIR="$A" "$SYNC" push; CLAUDE_MEMORY_DIR="$B" "$SYNC" pull
 (cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.320 CLAUDE_MEMORY_DIR="$A" "$SYNC" start >/dev/null)
 (cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.330 CLAUDE_MEMORY_DIR="$B" "$SYNC" start >/dev/null)
