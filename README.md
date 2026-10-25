@@ -34,7 +34,8 @@ copied to `~/.dotfiles-backup-<timestamp>/` first.
   (detects moved/tampered tags): `zsh-syntax-highlighting`, `zsh-autosuggestions`,
   `you-should-use`. `git` and `kubectl` are built-in Oh-My-Zsh plugins.
 - Fetches config files for this ref: `zshrc` → `~/.zshrc`, `fernandoataoldotcom-functions.zsh`
-  (custom functions, e.g. `go-rebase`), `tmux.conf`, `vimrc` (+ vim-plug), `htoprc`,
+  (custom functions, e.g. `go-rebase`), `tmux.conf` (+ `tmux-cheatsheet.txt`, shown by
+  prefix `?`), `vimrc` (+ vim-plug), `htoprc`,
   and `claude-settings.json` → `~/.claude/settings.json`.
 - Merges `vscode-machine-settings.json` into the VS Code server's machine settings
   (`~/.vscode-server/data/Machine/settings.json`). Today that only hides the chat

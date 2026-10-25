@@ -116,9 +116,17 @@ done
 ysu_want="$(grep -oE 'YOU_SHOULD_USE_SHA="[0-9a-f]{40}"' "$REPO/install" | grep -oE '[0-9a-f]{40}')"
 [ "$(git -C "$HOME/.oh-my-zsh/custom/plugins/you-should-use" rev-parse HEAD)" = "$ysu_want" ] \
   && pass "you-should-use verified at pinned SHA" || fail "you-should-use SHA mismatch"
-for f in .zshrc .tmux.conf .vimrc .config/htop/htoprc .vim/autoload/plug.vim; do
+for f in .zshrc .tmux.conf .tmux-cheatsheet.txt .vimrc .config/htop/htoprc .vim/autoload/plug.vim; do
   check "installed ~/$f" test -s "$HOME/$f"
 done
+tmux -L cfg -f "$HOME/.tmux.conf" new-session -d 'sleep 30' 2>"$WORK/tmux-cfg.err" \
+  && [ ! -s "$WORK/tmux-cfg.err" ] && pass "tmux.conf loads without errors" || fail "tmux.conf: $(cat "$WORK/tmux-cfg.err")"
+keys="$(tmux -L cfg list-keys -T prefix)"
+grep -q 'prefix *N *command-prompt.*select-pane -T' <<<"$keys" && grep -q -- '-r -T prefix *o ' <<<"$keys" \
+  && grep -q 'prefix *? *display-popup.*tmux-cheatsheet' <<<"$keys" \
+  && pass "tmux: N names a pane, o repeats, ? opens the cheat sheet" || fail "tmux bindings missing"
+[ "$(tmux -L cfg show -gv pane-border-status)" = top ] && pass "tmux: pane titles on the borders" || fail "pane-border-status not top"
+tmux -L cfg kill-server
 zsh -ic 'echo interactive-ok' 2>/dev/null | grep -qx interactive-ok \
   && pass "interactive zsh loads cleanly with the new config" || fail "interactive zsh failed to load"
 
