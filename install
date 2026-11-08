@@ -334,14 +334,24 @@ setup_memory() {
       rm -rf "$MEMORY_DIR"
       if [[ -n "$aside" ]]; then mv "$aside" "$MEMORY_DIR"; fi
       warn "Could not clone ${MEMORY_REPO}; Claude memory stays local to this VM."
-      [[ -n "$err" ]] && print -r -- "$err" | sed 's/^/WARN:   /' >&2
-      # A fine-grained token only reaches the repos picked when it was made, so the
-      # repo looks missing although it exists; only suggest creating it when it is.
-      if [[ "$(gh auth token 2>/dev/null)" == github_pat_* ]]; then
-        warn "gh is signed in with a fine-grained token, which may not include ${MEMORY_REPO}."
-        warn "Sign in again with 'gh auth logout -h github.com && yolo' (or add the repo to the token), then re-run this installer."
-      elif [[ "$(gh api "repos/${MEMORY_REPO}" --silent 2>&1)" == *"Not Found"* ]]; then
-        warn "Create it once with: gh repo create ${MEMORY_REPO} --private   (then re-run this installer)"
+      local line; for line in "${(@f)err}"; do [[ -z "$line" ]] || warn "  $line"; done
+      # gh reports a repo this login cannot see the same way as a missing one, so
+      # work out which before suggesting a fix. Other failures get only the error.
+      if [[ "$err" == *"Could not resolve to a Repository"* ]]; then
+        local owner="${MEMORY_REPO%%/*}" login relogin="gh auth logout -h github.com && "
+        if command -v yolo >/dev/null 2>&1; then relogin+="yolo"
+        else relogin+="gh auth login -h github.com -p https -w && gh auth setup-git"; fi
+        login="$(gh api user --jq .login 2>/dev/null || true)"
+        if [[ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]]; then
+          warn "gh is using the token in GH_TOKEN/GITHUB_TOKEN, which cannot see ${MEMORY_REPO}. Unset it or give it access, then re-run this installer."
+        elif [[ "$(gh auth token 2>/dev/null)" == github_pat_* ]]; then
+          warn "gh is signed in with a fine-grained token, which may not include ${MEMORY_REPO}."
+          warn "Sign in again with '${relogin}' (or add the repo to the token), then re-run this installer."
+        elif [[ -n "$login" && "$login" != "$owner" ]]; then
+          warn "gh is signed in as ${login}, which cannot see ${MEMORY_REPO}. If that is the wrong account, sign in again with '${relogin}', then re-run this installer."
+        else
+          warn "Create it once with: gh repo create ${MEMORY_REPO} --private   (then re-run this installer)"
+        fi
       fi
       return 0
     fi
