@@ -86,8 +86,10 @@ echo "$*" >> "$HOME/gh-calls.log"
 case "$1 ${2:-}" in
   "auth status") exit 0 ;;
   "config list") echo "clipboard=enabled" ;;
-  "api user")    echo "ci-user" ;;
-  "repo clone")  exec git clone -q "$FAKE_MEMORY_REMOTE" "$4" ;;
+  "api user")    echo "${FAKE_GH_LOGIN:-ci-user}" ;;
+  "auth token")  echo "${FAKE_GH_TOKEN:-gho_stub}" ;;
+  "repo clone")  [ -z "${FAKE_CLONE_ERR:-}" ] || { echo "$FAKE_CLONE_ERR" >&2; exit 1; }
+                 exec git clone -q "$FAKE_MEMORY_REMOTE" "$4" ;;
   "repo view")   echo PRIVATE ;;
 esac
 STUB
@@ -314,6 +316,33 @@ grep -qE 'fetched: .*(claude-memory-sync|CLAUDE\.md)' "$WORK/old-ref.log" \
 grep -q 'chmod' "$WORK/old-ref.log" && fail "chmod ran against a missing file" || pass "no chmod against a missing file"
 mv "$WORK/claude-memory-sync.saved" "$HOME/.local/bin/claude-memory-sync"
 REPO_RAW="file://$REPO" zsh "$REPO/install" >/dev/null 2>&1 || fail "reinstall from the checkout failed"
+
+note "A failed memory clone says why"
+mv "$HOME/.claude-memory" "$WORK/memory.saved"
+not_found="GraphQL: Could not resolve to a Repository with the name 'fernandoataoldotcom/claude-memory'. (repository)"
+# memory_clone_fails <log> <env...>: run the installer with a failing clone.
+memory_clone_fails() {
+  local log="$WORK/$1"; shift
+  env -u GH_TOKEN -u GITHUB_TOKEN "$@" REPO_RAW="file://$REPO" zsh "$REPO/install" >"$log" 2>&1 || fail "installer aborted on a failed memory clone ($log)"
+}
+hints='gh repo create|fine-grained token|GH_TOKEN|signed in as'
+memory_clone_fails pat.log FAKE_CLONE_ERR="$not_found" FAKE_GH_TOKEN=github_pat_stub
+grep -q 'Could not resolve' "$WORK/pat.log" && grep -q 'fine-grained token' "$WORK/pat.log" && grep -q '&& gh auth login' "$WORK/pat.log" \
+  && ! grep -q 'gh repo create' "$WORK/pat.log" \
+  && pass "fine-grained token: clone error shown, re-login hint (gh auth login without yolo)" || fail "fine-grained token hint wrong: $(grep WARN "$WORK/pat.log")"
+memory_clone_fails pat-net.log FAKE_CLONE_ERR="fatal: unable to access: Connection reset" FAKE_GH_TOKEN=github_pat_stub
+grep -q 'Connection reset' "$WORK/pat-net.log" && ! grep -qE "$hints" "$WORK/pat-net.log" \
+  && pass "fine-grained token, network failure: error shown, no hint" || fail "network failure got a hint: $(grep WARN "$WORK/pat-net.log")"
+memory_clone_fails env.log FAKE_CLONE_ERR="$not_found" GH_TOKEN=github_pat_stub
+grep -q 'GH_TOKEN/GITHUB_TOKEN' "$WORK/env.log" && ! grep -qE 'gh repo create|fine-grained token' "$WORK/env.log" \
+  && pass "token from GH_TOKEN: told to unset it" || fail "GH_TOKEN hint wrong: $(grep WARN "$WORK/env.log")"
+memory_clone_fails account.log FAKE_CLONE_ERR="$not_found"
+grep -q 'signed in as ci-user' "$WORK/account.log" && ! grep -q 'gh repo create' "$WORK/account.log" \
+  && pass "other account: wrong-account hint, no 'create it'" || fail "other-account hint wrong: $(grep WARN "$WORK/account.log")"
+memory_clone_fails missing.log FAKE_CLONE_ERR="$not_found" FAKE_GH_LOGIN=fernandoataoldotcom
+grep -q 'gh repo create' "$WORK/missing.log" && ! grep -qE 'fine-grained token|GH_TOKEN|signed in as' "$WORK/missing.log" \
+  && pass "missing repo: 'create it' hint shown" || fail "missing repo hint wrong: $(grep WARN "$WORK/missing.log")"
+rm -rf "$HOME/.claude-memory"; mv "$WORK/memory.saved" "$HOME/.claude-memory"
 
 note "claude-memory-sync: two VMs, one remote"
 SYNC="$HOME/.local/bin/claude-memory-sync"

@@ -329,11 +329,30 @@ setup_memory() {
     local aside=""
     if [[ -e "$MEMORY_DIR" ]]; then aside="${MEMORY_DIR}.local-${TS}"; mv "$MEMORY_DIR" "$aside"; fi
     log "Cloning Claude memory repo ${MEMORY_REPO} -> ${MEMORY_DIR}"
-    if ! gh repo clone "$MEMORY_REPO" "$MEMORY_DIR" -- --quiet 2>/dev/null; then
+    local err
+    if ! err="$(gh repo clone "$MEMORY_REPO" "$MEMORY_DIR" -- --quiet 2>&1)"; then
       rm -rf "$MEMORY_DIR"
       if [[ -n "$aside" ]]; then mv "$aside" "$MEMORY_DIR"; fi
       warn "Could not clone ${MEMORY_REPO}; Claude memory stays local to this VM."
-      warn "Create it once with: gh repo create ${MEMORY_REPO} --private   (then re-run this installer)"
+      local line; for line in "${(@f)err}"; do [[ -z "$line" ]] || warn "  $line"; done
+      # gh reports a repo this login cannot see the same way as a missing one, so
+      # work out which before suggesting a fix. Other failures get only the error.
+      if [[ "$err" == *"Could not resolve to a Repository"* ]]; then
+        local owner="${MEMORY_REPO%%/*}" login relogin="gh auth logout -h github.com && "
+        if command -v yolo >/dev/null 2>&1; then relogin+="yolo"
+        else relogin+="gh auth login -h github.com -p https -w && gh auth setup-git"; fi
+        login="$(gh api user --jq .login 2>/dev/null || true)"
+        if [[ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]]; then
+          warn "gh is using the token in GH_TOKEN/GITHUB_TOKEN, which cannot see ${MEMORY_REPO}. Unset it or give it access, then re-run this installer."
+        elif [[ "$(gh auth token 2>/dev/null)" == github_pat_* ]]; then
+          warn "gh is signed in with a fine-grained token, which may not include ${MEMORY_REPO}."
+          warn "Sign in again with '${relogin}' (or add the repo to the token), then re-run this installer."
+        elif [[ -n "$login" && "$login" != "$owner" ]]; then
+          warn "gh is signed in as ${login}, which cannot see ${MEMORY_REPO}. If that is the wrong account, sign in again with '${relogin}', then re-run this installer."
+        else
+          warn "Create it once with: gh repo create ${MEMORY_REPO} --private   (then re-run this installer)"
+        fi
+      fi
       return 0
     fi
     if [[ -n "$aside" && -d "${aside}/memory" ]]; then
