@@ -329,11 +329,20 @@ setup_memory() {
     local aside=""
     if [[ -e "$MEMORY_DIR" ]]; then aside="${MEMORY_DIR}.local-${TS}"; mv "$MEMORY_DIR" "$aside"; fi
     log "Cloning Claude memory repo ${MEMORY_REPO} -> ${MEMORY_DIR}"
-    if ! gh repo clone "$MEMORY_REPO" "$MEMORY_DIR" -- --quiet 2>/dev/null; then
+    local err
+    if ! err="$(gh repo clone "$MEMORY_REPO" "$MEMORY_DIR" -- --quiet 2>&1)"; then
       rm -rf "$MEMORY_DIR"
       if [[ -n "$aside" ]]; then mv "$aside" "$MEMORY_DIR"; fi
       warn "Could not clone ${MEMORY_REPO}; Claude memory stays local to this VM."
-      warn "Create it once with: gh repo create ${MEMORY_REPO} --private   (then re-run this installer)"
+      [[ -n "$err" ]] && print -r -- "$err" | sed 's/^/WARN:   /' >&2
+      # A fine-grained token only reaches the repos picked when it was made, so the
+      # repo looks missing although it exists; only suggest creating it when it is.
+      if [[ "$(gh auth token 2>/dev/null)" == github_pat_* ]]; then
+        warn "gh is signed in with a fine-grained token, which may not include ${MEMORY_REPO}."
+        warn "Sign in again with 'gh auth logout -h github.com && yolo' (or add the repo to the token), then re-run this installer."
+      elif [[ "$(gh api "repos/${MEMORY_REPO}" --silent 2>&1)" == *"Not Found"* ]]; then
+        warn "Create it once with: gh repo create ${MEMORY_REPO} --private   (then re-run this installer)"
+      fi
       return 0
     fi
     if [[ -n "$aside" && -d "${aside}/memory" ]]; then

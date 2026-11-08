@@ -87,7 +87,10 @@ case "$1 ${2:-}" in
   "auth status") exit 0 ;;
   "config list") echo "clipboard=enabled" ;;
   "api user")    echo "ci-user" ;;
-  "repo clone")  exec git clone -q "$FAKE_MEMORY_REMOTE" "$4" ;;
+  "api repos/"*) [ -z "${FAKE_REPO_MISSING:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; } ;;
+  "auth token")  echo "${FAKE_GH_TOKEN:-gho_stub}" ;;
+  "repo clone")  [ -z "${FAKE_CLONE_ERR:-}" ] || { echo "$FAKE_CLONE_ERR" >&2; exit 1; }
+                 exec git clone -q "$FAKE_MEMORY_REMOTE" "$4" ;;
   "repo view")   echo PRIVATE ;;
 esac
 STUB
@@ -314,6 +317,23 @@ grep -qE 'fetched: .*(claude-memory-sync|CLAUDE\.md)' "$WORK/old-ref.log" \
 grep -q 'chmod' "$WORK/old-ref.log" && fail "chmod ran against a missing file" || pass "no chmod against a missing file"
 mv "$WORK/claude-memory-sync.saved" "$HOME/.local/bin/claude-memory-sync"
 REPO_RAW="file://$REPO" zsh "$REPO/install" >/dev/null 2>&1 || fail "reinstall from the checkout failed"
+
+note "A failed memory clone says why"
+mv "$HOME/.claude-memory" "$WORK/memory.saved"
+FAKE_CLONE_ERR="remote: Write access to repository not granted." FAKE_GH_TOKEN=github_pat_stub \
+  REPO_RAW="file://$REPO" zsh "$REPO/install" >"$WORK/pat.log" 2>&1 || fail "installer aborted on a failed memory clone"
+grep -q 'Write access to repository not granted' "$WORK/pat.log" && grep -q 'fine-grained token' "$WORK/pat.log" \
+  && ! grep -q 'gh repo create' "$WORK/pat.log" \
+  && pass "fine-grained token: clone error shown, no 'create it' hint" || fail "fine-grained token hint wrong: $(grep WARN "$WORK/pat.log")"
+FAKE_CLONE_ERR="GraphQL: Could not resolve to a Repository" FAKE_REPO_MISSING=1 \
+  REPO_RAW="file://$REPO" zsh "$REPO/install" >"$WORK/missing.log" 2>&1 || fail "installer aborted on a missing memory repo"
+grep -q 'gh repo create' "$WORK/missing.log" && ! grep -q 'fine-grained token' "$WORK/missing.log" \
+  && pass "missing repo: 'create it' hint shown" || fail "missing repo hint wrong: $(grep WARN "$WORK/missing.log")"
+FAKE_CLONE_ERR="fatal: unable to access: Connection reset" \
+  REPO_RAW="file://$REPO" zsh "$REPO/install" >"$WORK/other.log" 2>&1 || fail "installer aborted on a failed memory clone"
+grep -q 'Connection reset' "$WORK/other.log" && ! grep -qE 'gh repo create|fine-grained token' "$WORK/other.log" \
+  && pass "other clone failure: error shown, no misleading hint" || fail "other clone failure output wrong: $(grep WARN "$WORK/other.log")"
+rm -rf "$HOME/.claude-memory"; mv "$WORK/memory.saved" "$HOME/.claude-memory"
 
 note "claude-memory-sync: two VMs, one remote"
 SYNC="$HOME/.local/bin/claude-memory-sync"
