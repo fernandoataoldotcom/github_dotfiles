@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.0](https://github.com/fernandoataoldotcom/github_dotfiles/compare/v2.4.0...v2.5.0) (2026-11-11)
+
+
+### Features
+
+* **claude:** give each new session a color no other session uses ([8db39b7](https://github.com/fernandoataoldotcom/github_dotfiles/commit/8db39b74621c65066ed16c60569d8f4e0b0ecb19))
+
 ## [2.4.0](https://github.com/fernandoataoldotcom/github_dotfiles/compare/v2.3.1...v2.4.0) (2026-11-11)
 
 
