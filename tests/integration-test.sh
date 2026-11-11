@@ -129,6 +129,7 @@ grep -q 'prefix *N *command-prompt.*select-pane -T' <<<"$keys" && grep -q -- '-r
   && grep -q 'prefix *? *display-popup.*tmux-cheatsheet' <<<"$keys" \
   && pass "tmux: N names a pane, o repeats, ? opens the cheat sheet" || fail "tmux bindings missing"
 [ "$(tmux -L cfg show -gv pane-border-status)" = top ] && pass "tmux: pane titles on the borders" || fail "pane-border-status not top"
+[ "$(tmux -L cfg show -gv focus-events)" = on ] && pass "tmux: focus events reach programs" || fail "focus-events not on"
 tmux -L cfg kill-server
 zsh -ic 'echo interactive-ok' 2>/dev/null | grep -qx interactive-ok \
   && pass "interactive zsh loads cleanly with the new config" || fail "interactive zsh failed to load"
