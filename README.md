@@ -127,6 +127,14 @@ It only sees git commands Claude runs, not yours.
 installed as `~/.claude/statusline.sh`) shows `model | dir (branch) | ctx N%` under
 the prompt, so you can see when the context is filling up.
 
+**A different color for each session.** A bare `claude` in an interactive shell
+starts with `/color` set to the color the fewest live sessions on the VM are using
+(random among ties), so sessions are easy to tell apart. It reads Claude Code's
+undocumented session registry and transcripts; if those look different, it says so
+and picks at random. Any arguments (`claude -p`, `claude --resume`) pass straight
+through. The function lives in
+[`fernandoataoldotcom-functions.zsh`](fernandoataoldotcom-functions.zsh).
+
 ## Rolling back
 
 If a new tag breaks VMs, install a known-good one; its own installer runs, not

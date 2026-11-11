@@ -264,6 +264,42 @@ note "zshrc regressions"
 [ "$(zsh -ic 'cd /nonexistent-dir 2>/dev/null; echo $?' 2>/dev/null | tail -1)" = 1 ] \
   && pass "cd keeps its exit status" || fail "cd lost its exit status"
 
+note "claude session colors"
+# Seven live sessions use every color but cyan. A dead session that was cyan, and
+# cyan quoted inside a message, must not count.
+mkdir -p "$HOME/.claude/sessions" "$HOME/.claude/projects/p"
+pids=()
+for c in red blue green yellow purple orange pink; do
+  sleep 300 & pids+=("$!")
+  echo "{\"sessionId\":\"s-$c\"}" > "$HOME/.claude/sessions/$!.json"
+  echo "{\"type\":\"agent-color\",\"agentColor\":\"$c\",\"sessionId\":\"s-$c\"}" > "$HOME/.claude/projects/p/s-$c.jsonl"
+done
+echo '{"type":"assistant","message":"set {\"type\":\"agent-color\",\"agentColor\":\"cyan\"}"}' >> "$HOME/.claude/projects/p/s-red.jsonl"
+echo '{"sessionId":"s-dead"}' > "$HOME/.claude/sessions/999999.json"
+echo '{"type":"agent-color","agentColor":"cyan","sessionId":"s-dead"}' > "$HOME/.claude/projects/p/s-dead.jsonl"
+touch -d '2 hours ago' "$HOME"/.claude/projects/p/*.jsonl
+picks="$(for i in 1 2 3 4 5; do zsh -ic '_claude_pick_color' 2>/dev/null; done | sort -u)"
+[ "$picks" = cyan ] && pass "picks the one color no live session uses" || fail "picked: $picks"
+zsh -ic '_claude_pick_color' 2>&1 >/dev/null | grep -q 'looks different' \
+  && fail "warned with the internals intact" || pass "no warning when the internals look as expected"
+zsh -ic 'claude' >/dev/null 2>&1
+[ "$(tail -n 1 "$HOME/claude-calls.log")" = "/color cyan" ] && pass "bare claude starts with /color" || fail "bare claude ran: $(tail -n 1 "$HOME/claude-calls.log")"
+# The stub records no color, as if Claude Code stopped writing agent-color entries.
+zsh -ic '_claude_pick_color' 2>&1 >/dev/null | grep -q 'not in any transcript' \
+  && pass "warns when the last launch's color never reached a transcript" || fail "no canary warning"
+echo '{"type":"agent-color","agentColor":"cyan","sessionId":"s-new"}' > "$HOME/.claude/projects/p/s-new.jsonl"
+zsh -ic '_claude_pick_color' 2>&1 >/dev/null | grep -q 'looks different' \
+  && fail "canary warned after the color was recorded" || pass "canary clears once the color is recorded"
+sleep 300 & pids+=("$!"); echo '{"id":"renamed"}' > "$HOME/.claude/sessions/$!.json"
+zsh -ic '_claude_pick_color' 2>&1 >/dev/null | grep -q 'has no sessionId' \
+  && pass "warns when a session file has no sessionId" || fail "no warning for a changed session file"
+zsh -ic 'claude -p hi' >/dev/null 2>&1
+[ "$(tail -n 1 "$HOME/claude-calls.log")" = "-p hi" ] && pass "claude with arguments passes through" || fail "claude -p ran: $(tail -n 1 "$HOME/claude-calls.log")"
+CLAUDECODE=1 zsh -ic 'claude' >/dev/null 2>&1
+[ -z "$(tail -n 1 "$HOME/claude-calls.log")" ] && pass "claude inside Claude Code gets no /color" || fail "inside Claude Code ran: $(tail -n 1 "$HOME/claude-calls.log")"
+kill "${pids[@]}" 2>/dev/null || true
+rm -rf "$HOME/.claude/sessions" "$HOME/.claude/projects/p" "$HOME/.cache/claude-session-color"
+
 note "Shell hand-off under a terminal, script piped on stdin (as curl|zsh does)"
 # The commands on script's stdin are typed into the pty and read by the shell the
 # installer execs. v2.0.0 gave that shell /dev/tty as stdin, which tmux refuses.
