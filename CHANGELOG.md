@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.0](https://github.com/fernandoataoldotcom/github_dotfiles/compare/v2.5.0...v2.6.0) (2026-11-13)
+
+
+### Features
+
+* **memory:** sync commits name the Claude surface that made them ([31c0764](https://github.com/fernandoataoldotcom/github_dotfiles/commit/31c07645b49b57b66d1da8dbf4281790cc555c2c))
+
 ## [2.5.0](https://github.com/fernandoataoldotcom/github_dotfiles/compare/v2.4.0...v2.5.0) (2026-11-11)
 
 
