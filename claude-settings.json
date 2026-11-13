@@ -30,21 +30,21 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "\"$HOME/.local/bin/claude-memory-sync\" start" }
+          { "type": "command", "command": "CLAUDE_MEMORY_SURFACE=Code \"$HOME/.local/bin/claude-memory-sync\" start" }
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "\"$HOME/.local/bin/claude-memory-sync\" push-async" }
+          { "type": "command", "command": "CLAUDE_MEMORY_SURFACE=Code \"$HOME/.local/bin/claude-memory-sync\" push-async" }
         ]
       }
     ],
     "SessionEnd": [
       {
         "hooks": [
-          { "type": "command", "command": "\"$HOME/.local/bin/claude-memory-sync\" push-async" }
+          { "type": "command", "command": "CLAUDE_MEMORY_SURFACE=Code \"$HOME/.local/bin/claude-memory-sync\" push-async" }
         ]
       }
     ]

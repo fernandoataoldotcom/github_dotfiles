@@ -76,7 +76,11 @@ releases with regressions). For a one-off, `CLAUDE_CHANNEL=latest` or
 `~/.claude-memory/memory`, a clone of a **private** repo (`MEMORY_REPO`, default
 `fernandoataoldotcom/claude-memory`) shared by every VM. Hooks run
 [`claude-memory-sync`](claude-memory-sync): pull at session start, commit + push
-after each turn and at session end. At session start it also compares
+after each turn and at session end. Every commit in the memory repo names the Claude
+surface that made it: the hooks set `CLAUDE_MEMORY_SURFACE=Code`, so sync commits
+get the committer name `Claude Code` and a `Code:` subject prefix while the author
+stays your git identity (`UI` and `Duet` also set the author name to `Claude UI` / `Claude Duet`).
+Without a valid surface it commits as before, warns, and tells the session at start. At session start it also compares
 `claude --version` with the newest version any VM has seen (`claude-code-version`
 in the memory repo). The first session on a newer version asks Claude to read the
 changelog since the old one and report only changes that touch this setup (settings

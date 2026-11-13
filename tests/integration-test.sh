@@ -403,10 +403,38 @@ git -C "$FAKE_MEMORY_REMOTE" cat-file -e main:memory/c.md 2>/dev/null \
   && pass "push-async pushes in the background" || fail "push-async did not push"
 [ -z "$(CLAUDE_MEMORY_DIR="$WORK/absent" "$SYNC" start)" ] && pass "no clone: silent no-op" || fail "printed without a clone"
 
+note "claude-memory-sync: commits name their surface"
+cs() { git -C "$1" log -1 --format='%an|%cn|%s' -- "memory/$2"; }
+me="$(git -C "$A" log -1 --format=%an -- memory/c.md)"   # the identity A committed with before
+echo e > "$A/memory/e.md"; CLAUDE_MEMORY_SURFACE=Code CLAUDE_MEMORY_DIR="$A" "$SYNC" pull
+[[ "$(cs "$A" e.md)" == "$me|Claude Code|Code: memory: "* ]] \
+  && pass "Code: author unchanged, committer 'Claude Code', subject 'Code: memory: ...'" || fail "Code commit: $(cs "$A" e.md)"
+echo f > "$B/memory/f.md"; CLAUDE_MEMORY_SURFACE=UI CLAUDE_MEMORY_DIR="$B" "$SYNC" push
+[[ "$(cs "$B" f.md)" == "Claude UI|Claude UI|UI: memory: "* ]] \
+  && pass "UI: authors its own commit as 'Claude UI', subject 'UI: memory: ...'" || fail "UI commit: $(cs "$B" f.md)"
+CLAUDE_MEMORY_SURFACE=Code CLAUDE_MEMORY_DIR="$A" "$SYNC" push
+[ "$(git -C "$A" rev-list --count '@{u}..HEAD')" = 0 ] && [[ "$(cs "$A" e.md)" == "$me|Claude Code|Code: "* ]] \
+  && pass "rebased onto the other VM's push: the committer name survives" || fail "after rebase: $(cs "$A" e.md)"
+hk="$(jq -r '.hooks[][].hooks[].command | select(test("claude-memory-sync"))' "$HOME/.claude/settings.json")"
+[ -n "$hk" ] && ! grep -qv '^CLAUDE_MEMORY_SURFACE=Code ' <<<"$hk" \
+  && pass "every claude-memory-sync hook sets CLAUDE_MEMORY_SURFACE=Code" || fail "a hook runs claude-memory-sync without the surface: $hk"
+for v in "" Chat; do
+  echo "g$v" > "$A/memory/g$v.md"
+  err="$(CLAUDE_MEMORY_SURFACE="$v" CLAUDE_MEMORY_DIR="$A" "$SYNC" push 2>&1 >/dev/null)"
+  [[ "$(cs "$A" "g$v.md")" == "$me|$me|memory: "* ]] && grep -q 'not Code, UI or Duet' <<<"$err" \
+    && pass "surface '${v:-unset}': commits as before (memory kept) and warns" || fail "surface '${v:-unset}': $(cs "$A" "g$v.md") / $err"
+done
+err="$(CLAUDE_MEMORY_DIR="$A" "$SYNC" pull 2>&1 >/dev/null)"
+grep -q 'not Code, UI or Duet' <<<"$err" \
+  && pass "no surface, nothing to commit: still warns (a rebase re-commits local commits)" || fail "no warning without a commit: $err"
+mkdir -p "$WORK/novcs"; out="$(cd "$WORK/novcs" && CLAUDE_MEMORY_DIR="$A" "$SYNC" start 2>/dev/null)"
+grep -q 'not Code, UI or Duet.*Tell the user' <<<"$out" \
+  && pass "start without a surface tells the session (push-async hides stderr)" || fail "start printed: $out"
+
 note "claude-memory-sync: Claude Code version check"
 vbin="$WORK/vbin"; mkdir -p "$vbin" "$WORK/novcs"
 printf '#!/bin/sh\necho "$FAKE_CLAUDE_VERSION (Claude Code)"\n' > "$vbin/claude"; chmod +x "$vbin/claude"
-vstart() { (cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION="$1" CLAUDE_MEMORY_DIR="$A" "$SYNC" start); }
+vstart() { (cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION="$1" CLAUDE_MEMORY_SURFACE=Code CLAUDE_MEMORY_DIR="$A" "$SYNC" start); }
 rm -f "$A/claude-code-version"
 [ -z "$(vstart 2.1.300)" ] && [ "$(cat "$A/claude-code-version")" = 2.1.300 ] \
   && pass "first run records the version silently" || fail "first run: $(cat "$A/claude-code-version" 2>/dev/null)"
@@ -417,7 +445,7 @@ grep -q 'updated from 2.1.300 to 2.1.310' <<<"$out" && [ "$(cat "$A/claude-code-
 [ -z "$(vstart 2.1.305)" ] && [ "$(cat "$A/claude-code-version")" = 2.1.310 ] \
   && pass "older version (a VM not yet updated): silent, keeps the newest" || fail "older version changed the record"
 [ -z "$(vstart 2.1.310)" ] && pass "after reporting, silent again" || fail "reported the same update twice"
-out="$(cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.315 CLAUDE_CODE_SESSION_ATTENDED=0 CLAUDE_MEMORY_DIR="$A" "$SYNC" start)"
+out="$(cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.315 CLAUDE_CODE_SESSION_ATTENDED=0 CLAUDE_MEMORY_SURFACE=Code CLAUDE_MEMORY_DIR="$A" "$SYNC" start)"
 [ -z "$out" ] && [ "$(cat "$A/claude-code-version")" = 2.1.310 ] \
   && pass "headless session (claude -p): no alert, version left for a person" || fail "headless run consumed the alert: $out"
 CLAUDE_MEMORY_DIR="$A" "$SYNC" push; CLAUDE_MEMORY_DIR="$B" "$SYNC" pull
