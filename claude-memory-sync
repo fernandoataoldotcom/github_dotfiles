@@ -19,6 +19,11 @@
 #   claude-memory-sync push         commit local changes, rebase, push
 #   claude-memory-sync push-async   same as push, detached (hooks must return fast)
 #
+# CLAUDE_MEMORY_SURFACE (Code, UI or Duet) names the Claude surface running the sync.
+# The memory repo's rule: every commit names its surface in git's committer name and
+# as a subject prefix. Code keeps the user as author; UI and Duet author their own
+# commits. The Claude Code hooks in claude-settings.json set Code.
+#
 # Never fails, and only `start`/`notes` print on stdout: a sync problem must not
 # block a session, and hook stdout ends up in Claude's context.
 
@@ -33,10 +38,22 @@ IDENT=()
   || IDENT=(-c user.name=claude-memory-sync -c user.email=claude-memory-sync@localhost)
 g()    { GIT_TERMINAL_PROMPT=0 timeout 20 git -C "$DIR" "${IDENT[@]}" "$@"; }
 
+# Exported, not passed to `commit` only: `pull --rebase` re-commits local commits
+# with the current committer, which would drop the surface's name.
+SURFACE="${CLAUDE_MEMORY_SURFACE:-}"
+case "$SURFACE" in
+  (Code)    export GIT_COMMITTER_NAME="Claude Code" ;;
+  (UI|Duet) export GIT_COMMITTER_NAME="Claude ${SURFACE}" GIT_AUTHOR_NAME="Claude ${SURFACE}" ;;
+  (*)       SURFACE="" ;;
+esac
+NO_SURFACE="CLAUDE_MEMORY_SURFACE is '${CLAUDE_MEMORY_SURFACE:-}', not Code, UI or Duet"
+# Every sync, not only one that commits: a rebase also re-commits earlier local commits.
+surface_warn() { [[ -n "$SURFACE" ]] || warn "${NO_SURFACE}; commits and rebased commits will not name a surface."; }
+
 commit_local() {
   g add -A >/dev/null 2>&1
   g diff --cached --quiet >/dev/null 2>&1 && return 0
-  g commit --quiet -m "memory: ${HOST:-unknown} $(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>/dev/null \
+  g commit --quiet -m "${SURFACE:+${SURFACE}: }memory: ${HOST:-unknown} $(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>/dev/null \
     || warn "commit failed; changes stay in the working tree."
 }
 
@@ -47,11 +64,13 @@ rebase_on_remote() {
 }
 
 pull() {
+  surface_warn
   commit_local
   rebase_on_remote || warn "pull failed (offline, empty remote or conflict); using the local copy."
 }
 
 push() {
+  surface_warn
   commit_local
   g rev-parse --verify -q HEAD >/dev/null 2>&1 || return 0        # nothing committed yet
   # Cheap exit for the common case (runs after every turn): nothing new to send.
@@ -135,7 +154,14 @@ locked() {
 
 case "${1:-}" in
   (pull|push) locked "$1" ;;
-  (start)     locked pull; notes; version_check ;;
+  (start)
+    locked pull; notes; version_check
+    # push-async discards stderr, so a hook without a surface would never be noticed.
+    if [[ -z "$SURFACE" ]]; then
+      print -r -- ""
+      print -r -- "claude-memory-sync: ${NO_SURFACE}, so this session's commits to the memory repo will not name their surface as that repo's rules require. Tell the user."
+    fi
+    ;;
   (notes)     notes ;;
   (push-async)
     if command -v setsid >/dev/null 2>&1; then
