@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.7.0](https://github.com/fernandoataoldotcom/github_dotfiles/compare/v2.6.0...v2.7.0) (2026-11-20)
+
+
+### Features
+
+* **claude:** default to auto mode and turn off unused synced skills in Code ([3ad7e64](https://github.com/fernandoataoldotcom/github_dotfiles/commit/3ad7e64328fa9f65c69e9d10b4c0b458eebced24))
+* **claude:** default to auto mode and turn off unused synced skills in Code ([1aa7e65](https://github.com/fernandoataoldotcom/github_dotfiles/commit/1aa7e65add1314ff060fa96e3c67467eee2dbdc9))
+
 ## [2.6.0](https://github.com/fernandoataoldotcom/github_dotfiles/compare/v2.5.0...v2.6.0) (2026-11-13)
 
 
