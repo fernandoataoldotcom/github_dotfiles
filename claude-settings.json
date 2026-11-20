@@ -8,6 +8,7 @@
   "autoMemoryDirectory": "~/.claude-memory/memory",
   "statusLine": { "type": "command", "command": "\"$HOME/.claude/statusline.sh\"" },
   "permissions": {
+    "defaultMode": "auto",
     "allow": [],
     "ask": ["Read(//**/.env)", "Edit(//**/.env)"],
     "deny": [
@@ -17,6 +18,13 @@
       "Bash(gh auth token)", "Bash(gh auth token *)", "Bash(gh auth status *-t*)",
       "Bash(kubectl *get *secret*)", "Bash(kubectl *describe *secret*)"
     ]
+  },
+  "skillOverrides": {
+    "anthropic-skills:built-in-browser": "off", "anthropic-skills:chrome-browser": "off",
+    "anthropic-skills:computer-use": "off", "anthropic-skills:deep-research": "off",
+    "anthropic-skills:morning": "off", "anthropic-skills:skill-creator": "off",
+    "anthropic-skills:import-memory": "off", "anthropic-skills:pptx": "off",
+    "anthropic-skills:xlsx": "off"
   },
   "hooks": {
     "PreToolUse": [
