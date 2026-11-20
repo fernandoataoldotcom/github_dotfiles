@@ -9,12 +9,17 @@
 # The same repo also holds private per-project notes (projects/<owner>/<repo>.md):
 # what a CLAUDE.md would say, for repos whose owners do not want one committed.
 # `start` prints them, and Claude Code adds a SessionStart hook's stdout to the
-# session's context, so nothing is ever written into the project repo.
+# session's context, so nothing is ever written into the project repo. In a folder
+# holding several clones, `start` prints only an index, and `touch` (a PreToolUse
+# hook) adds a repo's notes the first time the session reads, edits or runs a
+# command in it.
 #
 #   claude-memory-sync start        pull, then print the notes for the repo in $PWD
-#                                   (or for each repo up to two levels inside $PWD),
-#                                   and flag a Claude Code update no VM has seen yet
-#   claude-memory-sync notes        print the notes only
+#                                   (or an index of the repos up to two levels inside
+#                                   $PWD), and flag a Claude Code update no VM has seen
+#   claude-memory-sync notes        print the notes (or the index) only
+#   claude-memory-sync touch        PreToolUse hook: add the notes for a repo the tool
+#                                   call works in, once per session, and log the load
 #   claude-memory-sync pull         commit local changes, then rebase onto the remote
 #   claude-memory-sync push         commit local changes, rebase, push
 #   claude-memory-sync push-async   same as push, detached (hooks must return fast)
@@ -32,9 +37,10 @@ LOCK="${DIR}/.git/claude-memory-sync.lock"
 
 warn() { print -r -- "claude-memory-sync: $*" >&2; }
 # Fresh VMs may not have a git identity yet; never let that drop a memory. Commits
-# AND rebases need one, so it applies to every git call.
+# AND rebases need one, so it applies to every git call. `touch` never commits and
+# runs before every tool call, so it skips the lookup.
 IDENT=()
-[[ -n "$(git -C "$DIR" config user.email 2>/dev/null)" ]] \
+[[ "${1:-}" == touch || -n "$(git -C "$DIR" config user.email 2>/dev/null)" ]] \
   || IDENT=(-c user.name=claude-memory-sync -c user.email=claude-memory-sync@localhost)
 g()    { GIT_TERMINAL_PROMPT=0 timeout 20 git -C "$DIR" "${IDENT[@]}" "$@"; }
 
@@ -92,15 +98,58 @@ repo_key() {
   print -r -- "${(L)key}"
 }
 
+# Claude Code caps a hook's context text at 10,000 characters and swaps anything
+# longer for a file path and a 2,000-character preview it never asks Claude to read.
+# Long notes are cut at a line and point to the file, leaving room for the rest of
+# the hook's output.
+NOTES_MAX=8000
+notes_text() {
+  local f="${DIR}/projects/$1.md" body
+  body="$(<"$f")"
+  if (( ${#body} > NOTES_MAX )); then
+    body="${body[1,NOTES_MAX]}"; body="${body%$'\n'*}"
+    body+=$'\n'"[Cut at ${NOTES_MAX} characters. Read ${f} for the rest before changing anything in this repo.]"
+  fi
+  print -r -- "===== Notes for $1 ====="
+  print -r -- "$body"
+}
+
+# First line of a notes file that is not blank or a heading, for the index.
+summary() {
+  local line
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    (( ${#line} > 160 )) && line="${line[1,157]}..."
+    print -r -- "$line"; return
+  done < "$1"
+}
+
+# Per-session record of the repos whose notes are already in context, one file per
+# repo root. Session ids come from hook input, so only safe characters pass.
+SESSIONS="${XDG_CACHE_HOME:-$HOME/.cache}/claude-memory-sync/sessions"
+session_dir() { [[ "$1" =~ '^[A-Za-z0-9_-]+$' ]] && print -r -- "${SESSIONS}/$1"; }
+mark() { [[ -n "$1" ]] && mkdir -p "$1" 2>/dev/null && print -r -- "$3" > "$1/${2//\//%}"; }
+
+# One line per notes load, in one file per host and month so VMs never conflict.
+# Synced with the rest of the repo; it shows whether the lazy loading misses repos.
+log_load() {
+  local host="${${HOST:-unknown}//[^A-Za-z0-9._-]/_}" d="${DIR}/logs/notes-loads"
+  mkdir -p "$d" 2>/dev/null || return 0
+  print -r -- "$(date -u +%Y-%m-%dT%H:%M:%SZ)	${host}	${SURFACE:-none}	${3[1,8]}	$1	$2" \
+    >> "$d/${host}-$(date -u +%Y-%m).log"
+}
+
 # Notes for the git repo containing $PWD. When $PWD is not in a repo (a workspace
-# folder holding several clones), notes for each repo one or two levels inside it
-# (clones are often grouped by owner: <owner>/<repo>).
+# folder holding several clones), an index of the repos one or two levels inside it
+# (clones are often grouped by owner: <owner>/<repo>): their full notes would pass
+# the context cap, so `touch` adds each one when the session starts working in it.
+# $1: the session's marker directory, when called from the SessionStart hook.
 notes() {
-  local -a dirs=()
+  local -a dirs=(); local inrepo=0
   if git rev-parse --show-toplevel >/dev/null 2>&1; then
-    dirs=("$(git rev-parse --show-toplevel)")
+    dirs=("${$(git rev-parse --show-toplevel):A}"); inrepo=1
   else
-    dirs=(*/.git(N:h) */*/.git(N:h)); dirs=("${(@)dirs[1,24]}")
+    dirs=(*/.git(N:h:A) */*/.git(N:h:A)); dirs=("${(@)dirs[1,24]}")
   fi
   local d key; local -aU have=() missing=()   # -U: two clones of one repo share notes
   for d in "${dirs[@]}"; do
@@ -110,15 +159,83 @@ notes() {
   done
   (( ${#have} + ${#missing} )) || return 0
   print -r -- "Private project notes live in ${DIR}/projects/<owner>/<repo>.md (owner and repo in lowercase), outside the project repos and synced across VMs. Treat them like each repo's CLAUDE.md: edit those files to record durable, project-specific instructions (build/test commands, conventions), and never add a CLAUDE.md to a project itself unless asked."
-  for key in "${have[@]}"; do
+  if (( inrepo )); then
+    for key in "${have[@]}"; do
+      print -r -- ""
+      notes_text "$key"
+    done
+    mark "$1" "${dirs[1]}" "$key"
+  elif (( ${#have} )); then
     print -r -- ""
-    print -r -- "===== Notes for ${key} ====="
-    cat "${DIR}/projects/${key}.md"
-  done
+    print -r -- "Notes for the repos in this folder are not loaded yet. A hook adds a repo's notes to this session the first time you read, edit or run a command in it. If you work in a repo any other way, read its notes file first."
+    for key in "${have[@]}"; do
+      print -r -- "- ${key}: $(summary "${DIR}/projects/${key}.md") (${DIR}/projects/${key}.md)"
+    done
+  fi
   if (( ${#missing} )); then
     print -r -- ""
     print -r -- "No notes yet for: ${(j:, :)missing}"
   fi
+}
+
+# Nearest directory at or above $1 holding .git (a directory, or a file in worktrees
+# and submodules). Plain stat calls: this runs before every tool call.
+repo_root() {
+  local d="${1:A}"
+  while [[ -n "$d" && "$d" != / ]]; do
+    [[ -e "$d/.git" ]] && { print -r -- "$d"; return 0; }
+    d="${d:h}"
+  done
+  return 1
+}
+
+# PreToolUse hook. Finds the repos a tool call works in (the file a Read, Edit or
+# Write names; for Bash, the shell's cwd plus any argument that is a path), and adds
+# the notes for each repo this session has not seen yet. Best effort for Bash: a
+# command that names a repo only indirectly is missed, so a Bash call that looks like
+# a write but resolves to no repo is logged as `Bash-unresolved`.
+touch_repo() {
+  local -a in=("${(@0)$(jq -j '[.session_id, .tool_name, .cwd, (.tool_input.file_path // ""), (.tool_input.command // "")]
+    | map(. // "" | tostring) | join("\u0000")' 2>/dev/null)}")
+  # Not `path`: zsh ties it to $PATH.
+  local sid="${in[1]}" tool="${in[2]}" cwd="${in[3]}" file="${in[4]}" cmd="${in[5]}"
+  local sdir; sdir="$(session_dir "$sid")" || return 0
+  [[ -d "$cwd" ]] || cwd="$PWD"
+  local -a cands=()
+  if [[ -n "$file" ]]; then
+    [[ "$file" == /* ]] || file="${cwd}/${file}"
+    cands=("$file")
+  elif [[ "$tool" == Bash ]]; then
+    cands=("$cwd")
+    local tok
+    for tok in "${(@)${(z)cmd}[1,200]}"; do
+      tok="${(Q)tok}"; tok="${tok#*=}"; tok="${tok/#\~/$HOME}"
+      [[ -z "$tok" || "$tok" == -* || "$tok" == *://* ]] && continue
+      [[ "$tok" == */* || -d "${cwd}/${tok}" ]] || continue
+      [[ "$tok" == /* ]] || tok="${cwd}/${tok}"
+      cands+=("$tok")
+    done
+  fi
+  local c root key out="" used=0 text; local -aU roots=()
+  for c in "${cands[@]}"; do root="$(repo_root "$c")" && roots+=("$root"); done
+  if (( ! ${#roots} )) && [[ "$tool" == Bash && "$cmd" =~ '(git (add|commit|push|mv|rm)|sed -i|tee |[^0-9&]>)' ]]; then
+    log_load "-" Bash-unresolved "$sid"
+  fi
+  for root in "${roots[@]}"; do
+    [[ -e "${sdir}/${root//\//%}" ]] && continue
+    key="$(repo_key "$root")"
+    if [[ -z "$key" || ! -s "${DIR}/projects/${key}.md" ]]; then
+      mark "$sdir" "$root" "$key"; continue
+    fi
+    text="$(notes_text "$key")"
+    # Two repos in one call could pass the cap together; the rest load on a later call.
+    (( used + ${#text} > NOTES_MAX + 1000 )) && continue
+    out+="${out:+$'\n\n'}${text}"; (( used += ${#text} ))
+    mark "$sdir" "$root" "$key"; log_load "$key" "$tool" "$sid"
+  done
+  [[ -n "$out" ]] || return 0
+  jq -cn --arg ctx "Project notes for a repo this session is now working in:"$'\n\n'"${out}" \
+    '{hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $ctx}}'
 }
 
 # Claude Code's newest version seen by any VM, shared through the memory repo. On a
@@ -155,7 +272,15 @@ locked() {
 case "${1:-}" in
   (pull|push) locked "$1" ;;
   (start)
-    locked pull; notes; version_check
+    # SessionStart hook input names the session. A resumed session still holds the
+    # notes it loaded; after /clear or a compaction they are gone, so they load again.
+    hook_in=""; [[ -t 0 ]] || hook_in="$(timeout 2 cat 2>/dev/null)"
+    sdir="$(session_dir "$(jq -r '.session_id // ""' <<<"$hook_in" 2>/dev/null)")"
+    if [[ -n "$sdir" ]]; then
+      [[ "$(jq -r '.source // ""' <<<"$hook_in" 2>/dev/null)" == resume ]] || rm -rf "$sdir"
+      find "$SESSIONS" -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf {} + 2>/dev/null
+    fi
+    locked pull; notes "$sdir"; version_check
     # push-async discards stderr, so a hook without a surface would never be noticed.
     if [[ -z "$SURFACE" ]]; then
       print -r -- ""
@@ -163,6 +288,7 @@ case "${1:-}" in
     fi
     ;;
   (notes)     notes ;;
+  (touch)     touch_repo ;;
   (push-async)
     if command -v setsid >/dev/null 2>&1; then
       setsid "${0:A}" push </dev/null >/dev/null 2>&1 &!
@@ -171,7 +297,7 @@ case "${1:-}" in
     fi
     ;;
   (*)
-    warn "usage: claude-memory-sync start|notes|pull|push|push-async"
+    warn "usage: claude-memory-sync start|notes|touch|pull|push|push-async"
     ;;
 esac
 exit 0

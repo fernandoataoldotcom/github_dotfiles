@@ -95,8 +95,14 @@ gh repo create fernandoataoldotcom/claude-memory --private
 committed, put what it would say in `~/.claude-memory/projects/<owner>/<repo>.md`
 (owner and repo in lowercase).
 The session-start hook prints that file into Claude's context when you start
-`claude` inside a clone of that repo, or in a folder that holds several clones up
-to two levels down (it then prints the notes for each), so nothing is written to the project. Ask
+`claude` inside a clone of that repo, so nothing is written to the project. Started
+in a folder that holds several clones up to two levels down, it prints only an index
+(one line per repo with notes), and a PreToolUse hook (`claude-memory-sync touch`)
+adds a repo's full notes the first time the session reads, edits or runs a command
+in it. Claude Code caps hook context at 10,000 characters, so notes longer than
+8,000 are cut at a line and point to the file. Each load is logged to
+`logs/notes-loads/<host>-<month>.log` in the memory repo, along with Bash writes it
+could not tie to a repo, to show whether the lazy loading misses anything. Ask
 Claude to "update the project notes" instead of running `/init`.
 
 **Personal preferences in every session.** `claude-CLAUDE.md` is installed as
