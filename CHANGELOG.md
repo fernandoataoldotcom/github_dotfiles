@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.8.0](https://github.com/fernandoataoldotcom/github_dotfiles/compare/v2.7.0...v2.8.0) (2026-11-21)
+
+
+### Features
+
+* **memory:** load project notes when a session first works in a repo ([03be432](https://github.com/fernandoataoldotcom/github_dotfiles/commit/03be4325b4abea8b6946f8564e562941a72fbc15))
+* **memory:** load project notes when a session first works in a repo ([d9cf990](https://github.com/fernandoataoldotcom/github_dotfiles/commit/d9cf9908624b251052c44b34169d46bc4e12e4c3))
+
 ## [2.7.0](https://github.com/fernandoataoldotcom/github_dotfiles/compare/v2.6.0...v2.7.0) (2026-11-20)
 
 
