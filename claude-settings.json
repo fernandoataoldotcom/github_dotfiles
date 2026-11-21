@@ -33,6 +33,12 @@
         "hooks": [
           { "type": "command", "command": "\"$HOME/.claude/hooks/gitleaks-guard.sh\"", "timeout": 300 }
         ]
+      },
+      {
+        "matcher": "Read|Edit|Write|Bash",
+        "hooks": [
+          { "type": "command", "command": "CLAUDE_MEMORY_SURFACE=Code \"$HOME/.local/bin/claude-memory-sync\" touch", "timeout": 10 }
+        ]
       }
     ],
     "SessionStart": [

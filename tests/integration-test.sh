@@ -464,16 +464,52 @@ mk lead-capture                     https://github.com/glueops-marketing/lead-ca
 mk tenant/deployment-configurations git@github.com:tenant-glueops/deployment-configurations.git
 mk a/b/too-deep                     https://github.com/x/too-deep.git
 mkdir -p "$A/projects/glueops-marketing" "$A/projects/tenant-glueops"
-echo 'website notes' > "$A/projects/glueops-marketing/website.md"
-echo 'deploy notes'  > "$A/projects/tenant-glueops/deployment-configurations.md"
+printf '# website\n\nwebsite notes\nwebsite detail\n' > "$A/projects/glueops-marketing/website.md"
+printf 'deploy notes\ndeploy detail\n' > "$A/projects/tenant-glueops/deployment-configurations.md"
 n="$(cd "$ws" && "$SYNC" notes)"
-grep -q 'website notes' <<<"$n" && pass "workspace folder: notes for a top-level clone (mixed-case owner -> lowercase key)" || fail "website notes missing"
-grep -q 'deploy notes' <<<"$n"  && pass "workspace folder: notes for a clone nested under an owner folder" || fail "nested notes missing"
+grep -q -- '- glueops-marketing/website: website notes' <<<"$n" && pass "workspace folder: index entry for a top-level clone (mixed-case owner -> lowercase key)" || fail "website index entry missing: $n"
+grep -q -- '- tenant-glueops/deployment-configurations: deploy notes' <<<"$n" && pass "workspace folder: index entry for a clone nested under an owner folder" || fail "nested index entry missing"
+grep -q 'detail' <<<"$n" && fail "workspace folder printed full notes" || pass "workspace folder: index only, no full notes"
 grep -q 'No notes yet for: .*glueops-marketing/lead-capture' <<<"$n" && pass "lists repos without notes" || fail "missing-notes line wrong"
 grep -q 'too-deep' <<<"$n" && fail "looked three levels deep" || pass "ignores clones three levels down"
 n="$(cd "$ws/tenant/deployment-configurations" && "$SYNC" notes)"
 grep -q 'deploy notes' <<<"$n" && ! grep -q 'website notes' <<<"$n" \
   && pass "inside a clone: only that repo's notes" || fail "inside-clone notes wrong"
 [ -z "$(cd "$WORK" && mkdir -p empty && cd empty && "$SYNC" notes)" ] && pass "folder without clones: prints nothing" || fail "printed for an empty folder"
+
+note "claude-memory-sync: notes load on first touch"
+jq -e '.hooks.PreToolUse[] | select(.matcher == "Read|Edit|Write|Bash") | .hooks[0].command | test("claude-memory-sync\" touch$")' \
+  "$HOME/.claude/settings.json" >/dev/null && pass "settings: PreToolUse hook runs claude-memory-sync touch" || fail "touch hook missing"
+export XDG_CACHE_HOME="$WORK/cache"
+tch() { jq -cn --arg s "$1" --arg t "$2" --arg c "$3" --arg f "$4" --arg cmd "$5" \
+  '{session_id:$s, tool_name:$t, cwd:$c, tool_input:{file_path:$f, command:$cmd}}' | (cd "$ws" && "$SYNC" touch); }
+ctx() { jq -r '.hookSpecificOutput.additionalContext // empty' <<<"$1"; }
+(cd "$ws" && echo '{"session_id":"t1","source":"startup"}' | "$SYNC" start >/dev/null)
+out="$(tch t1 Read "$ws" "$ws/website/src/app.ts" "")"
+[ "$(jq -r .hookSpecificOutput.hookEventName <<<"$out")" = PreToolUse ] && grep -q 'website detail' <<<"$(ctx "$out")" \
+  && pass "first Read in a repo adds its full notes as PreToolUse context" || fail "first touch: $out"
+[ -z "$(tch t1 Edit "$ws" "$ws/website/README.md" "")" ] && pass "second touch of the same repo: silent" || fail "notes loaded twice"
+grep -q 'deploy detail' <<<"$(ctx "$(tch t1 Bash "$ws" "" "cd tenant/deployment-configurations && make test")")" \
+  && pass "Bash: a cd into a repo loads its notes" || fail "Bash cd did not load notes"
+[ -z "$(tch t1 Bash "$ws/website" "" "npm test")" ] && pass "Bash in an already loaded repo: silent" || fail "Bash reloaded notes"
+[ -z "$(tch t1 Read "$ws" "$ws/lead-capture/x" "")" ] && pass "repo without notes: silent" || fail "printed for a repo without notes"
+tch t1 Bash / "" "echo hi > out.txt" >/dev/null
+log="$(cat "$A"/logs/notes-loads/*.log)"
+[ "$(grep -c $'\tt1\t' <<<"$log")" = 3 ] && grep -q $'\tglueops-marketing/website\tRead$' <<<"$log" \
+  && grep -q $'\t-\tBash-unresolved$' <<<"$log" && pass "log: one line per load and one for an unresolved Bash write" || fail "log: $log"
+[ -z "$(tch '../escape' Read "$ws" "$ws/website/a" "")" ] && [ ! -e "$WORK/cache/claude-memory-sync/escape" ] \
+  && pass "unsafe session id: ignored" || fail "unsafe session id accepted"
+(cd "$ws" && echo '{"session_id":"t1","source":"resume"}' | "$SYNC" start >/dev/null)
+[ -z "$(tch t1 Read "$ws" "$ws/website/a" "")" ] && pass "resume: notes already in context stay loaded" || fail "resume reloaded notes"
+(cd "$ws" && echo '{"session_id":"t1","source":"compact"}' | "$SYNC" start >/dev/null)
+grep -q 'website detail' <<<"$(ctx "$(tch t1 Read "$ws" "$ws/website/a" "")")" \
+  && pass "after a compaction: notes load again" || fail "compaction kept stale markers"
+(cd "$ws/website" && echo '{"session_id":"t2","source":"startup"}' | "$SYNC" start >/dev/null)
+[ -z "$(tch t2 Read "$ws" "$ws/website/a" "")" ] && pass "started inside a repo: its notes are not added twice" || fail "in-repo start not marked"
+{ echo '# big'; for i in $(seq 400); do echo "line $i of a long notes file, padded to pass the cap"; done; } > "$A/projects/glueops-marketing/website.md"
+c="$(ctx "$(tch t3 Read "$ws" "$ws/website/a" "")")"
+(( ${#c} < 10000 )) && grep -q "^\[Cut at 8000 characters. Read .*website.md for the rest" <<<"$c" \
+  && pass "long notes: cut under Claude Code's 10,000-character cap, with a pointer to the file" || fail "long notes: ${#c} chars"
+unset XDG_CACHE_HOME
 
 note "ALL CHECKS PASSED"
