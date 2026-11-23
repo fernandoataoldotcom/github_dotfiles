@@ -555,6 +555,26 @@ grep -q "says 'not a date'" <<<"$(pstart)" \
 mkprio UTC-14 2000-01-01 "old priority"
 [ -z "$(pstart CLAUDE_CODE_SESSION_ATTENDED=0)" ] \
   && pass "headless session: no blocker (nobody to ask)" || fail "headless run printed a blocker"
+mkprio UTC-14 "$ahead" ""
+out="$(pstart)"
+grep -q 'Priority line .* is empty' <<<"$out" && ! grep -q "says '" <<<"$out" \
+  && pass "empty priority text: names the empty line, not a contradictory date" || fail "empty priority message: $out"
+printf '%s\r\n* Time zone: UTC-14\r\n* Date: %s\r\n* Priority:   ship the post  \r\n' "## Today's priority" "$ahead" > "$pfile"
+grep -q "Today's priority ($ahead, from .*): ship the post$" <<<"$(pstart)" \
+  && pass "CRLF line endings, '*' bullets and stray spaces still parse" || fail "formatting variations not parsed"
+mkprio Mars/Olympus "$(date +%F)" "ship the post"
+out="$(pstart)"
+grep -q "Today's priority" <<<"$out" && grep -q "'Mars/Olympus' in that file is not available" <<<"$out" \
+  && pass "unknown time zone: the VM's date is used and the session is told" || fail "unknown time zone: $out"
+mkprio UTC-14 "$ahead" "$(printf 'x%.0s' $(seq 600))"
+out="$(pstart)"
+grep -q 'cut here; the full text is in the file' <<<"$out" && [ "${#out}" -lt 900 ] \
+  && pass "long priority: cut with a pointer to the file" || fail "long priority: ${#out} characters"
+mkprio UTC-14 "$ahead" "ship the post"
+out="$(cd "$ws/tenant/deployment-configurations" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.310 CLAUDE_MEMORY_SURFACE=Code CLAUDE_MEMORY_DIR="$A" env -u CLAUDE_CODE_SESSION_ATTENDED "$SYNC" start 2>/dev/null)"
+p="$(grep -n "Today's priority" <<<"$out" | head -1 | cut -d: -f1)"; n="$(grep -n '===== Notes for' <<<"$out" | head -1 | cut -d: -f1)"
+[ -n "$p" ] && [ -n "$n" ] && [ "$p" -lt "$n" ] \
+  && pass "priority comes before the notes (it must survive Claude Code's 2,000-character preview)" || fail "order: priority line ${p:-none}, notes line ${n:-none}"
 rm -f "$pfile"
 
 note "ALL CHECKS PASSED"
