@@ -512,4 +512,49 @@ c="$(ctx "$(tch t3 Read "$ws" "$ws/website/a" "")")"
   && pass "long notes: cut under Claude Code's 10,000-character cap, with a pointer to the file" || fail "long notes: ${#c} chars"
 unset XDG_CACHE_HOME
 
+note "claude-memory-sync: daily priority check"
+pfile="$A/context/topics/current-priority.md"; mkdir -p "${pfile%/*}"
+# POSIX zone names (UTC-14 is 14 h ahead of UTC): the container has no tzdata. A zone 14 h
+# ahead and one 12 h behind never share a date, so the date a file names tells them apart.
+mkprio() { cat > "$pfile" <<EOF
+## Standing priority
+- Date: 1999-01-01
+## Today's priority
+- Time zone: $1
+- Date: $2
+- Priority: $3
+- Set by: test
+## Rules
+- Date: 1999-01-01
+EOF
+}
+pstart() { (cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.310 CLAUDE_MEMORY_SURFACE=Code CLAUDE_MEMORY_DIR="$A" env -u CLAUDE_CODE_SESSION_ATTENDED "$@" "$SYNC" start 2>/dev/null); }
+ahead="$(TZ=UTC-14 date +%F)"
+rm -f "$pfile"
+[ -z "$(pstart)" ] && pass "no priority file: silent" || fail "printed without a priority file"
+mkprio UTC-14 "$ahead" "ship the post"
+out="$(pstart)"
+grep -q "Today's priority ($ahead, from .*): ship the post" <<<"$out" && ! grep -q 'not set' <<<"$out" \
+  && pass "priority set for today: printed, no blocker" || fail "set priority: $out"
+mkprio UTC-14 2000-01-01 "old priority"
+out="$(pstart)"
+grep -q "not set for today ($ahead)" <<<"$out" && grep -q 'Before starting any work, ask' <<<"$out" && ! grep -q 'old priority' <<<"$out" \
+  && pass "stale date: tells the session to ask before any work" || fail "stale priority: $out"
+mkprio UTC+12 "$ahead" "ship the post"
+grep -q 'not set for today' <<<"$(pstart)" \
+  && pass "the time zone in the file decides what today is" || fail "time zone ignored"
+mkprio "" "$(date +%F)" "ship the post"
+grep -q "Today's priority" <<<"$(pstart)" \
+  && pass "no time zone in the file: the VM's date counts" || fail "local date not used"
+mkprio UTC-14 "$ahead" ""
+grep -q 'not set for today' <<<"$(pstart)" \
+  && pass "date set but no priority text: still blocks" || fail "empty priority accepted"
+mkprio UTC-14 "not a date" "ship the post"
+grep -q "says 'not a date'" <<<"$(pstart)" \
+  && pass "garbage date: blocks" || fail "garbage date accepted"
+mkprio UTC-14 2000-01-01 "old priority"
+[ -z "$(pstart CLAUDE_CODE_SESSION_ATTENDED=0)" ] \
+  && pass "headless session: no blocker (nobody to ask)" || fail "headless run printed a blocker"
+rm -f "$pfile"
+
 note "ALL CHECKS PASSED"

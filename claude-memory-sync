@@ -16,7 +16,9 @@
 #
 #   claude-memory-sync start        pull, then print the notes for the repo in $PWD
 #                                   (or an index of the repos up to two levels inside
-#                                   $PWD), and flag a Claude Code update no VM has seen
+#                                   $PWD), print today's priority (or tell the session to
+#                                   ask for it first), and flag a Claude Code update no
+#                                   VM has seen
 #   claude-memory-sync notes        print the notes (or the index) only
 #   claude-memory-sync touch        PreToolUse hook: add the notes for a repo the tool
 #                                   call works in, once per session, and log the load
@@ -259,6 +261,30 @@ version_check() {
   print -r -- "Claude Code was updated from ${seen} to ${now}, a version no VM had run before. At the start of your first reply, read the changelog entries after ${seen} up to ${now} (https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md) and tell the user, in a few lines, only the changes that affect this setup: settings keys used in ~/.claude/settings.json (renamed, retired, new defaults), hooks, permission rules, the status line, memory and CLAUDE.md loading, and commit or PR attribution. If nothing affects it, say so in one line."
 }
 
+# The user's daily priority is declared in context/topics/current-priority.md in the
+# memory repo. A priority not set for today blocks work until the user decides it, and
+# an instruction in a file the session may never open fails silently, so say it here.
+# When it is set, print it so the session can keep the user on it. The file names the
+# time zone its dates use ("- Time zone: ..." under "Today's priority"); without one,
+# the VM's local date counts. No file, no output.
+PRIORITY_FILE="${DIR}/context/topics/current-priority.md"
+priority_check() {
+  [[ -r "$PRIORITY_FILE" ]] || return 0
+  # Headless runs (claude -p, schedulers) have nobody to ask: they use the standing priority.
+  [[ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" == 0 ]] && return 0
+  local field tz day date prio
+  field() { awk -v h="## Today's priority" -v k="- $1: " \
+    '/^## /{s=($0==h)} s && index($0,k)==1 {print substr($0,length(k)+1); exit}' "$PRIORITY_FILE"; }
+  tz="$(field 'Time zone')"; date="$(field Date)"; prio="$(field Priority)"
+  if [[ -n "$tz" ]]; then day="$(TZ="$tz" date +%F)"; else day="$(date +%F)"; fi
+  print -r -- ""
+  if [[ "$date" == "$day" && -n "$prio" ]]; then
+    print -r -- "Today's priority (${date}, from ${PRIORITY_FILE}): ${prio[1,500]}"
+  else
+    print -r -- "The user's priority is not set for today (${day}): the Date line under \"Today's priority\" in ${PRIORITY_FILE} says '${date[1,40]:-missing}'. Before starting any work, ask them to decide it: offer the standing priority in that file as the default, and ask what, if anything, outranks it today. Then record the answer under \"Today's priority\" (Date, Priority, Set by). Questions, status checks and farewells are not work."
+  fi
+}
+
 # One sync at a time; a lock left by a crashed run is cleared after 5 minutes.
 locked() {
   [[ -n "$(find "$LOCK" -maxdepth 0 -mmin +5 2>/dev/null)" ]] && rmdir "$LOCK" 2>/dev/null
@@ -280,7 +306,7 @@ case "${1:-}" in
       [[ "$(jq -r '.source // ""' <<<"$hook_in" 2>/dev/null)" == resume ]] || rm -rf "$sdir"
       find "$SESSIONS" -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf {} + 2>/dev/null
     fi
-    locked pull; notes "$sdir"; version_check
+    locked pull; notes "$sdir"; priority_check; version_check
     # push-async discards stderr, so a hook without a surface would never be noticed.
     if [[ -z "$SURFACE" ]]; then
       print -r -- ""
