@@ -307,7 +307,7 @@ note "Shell hand-off under a terminal, script piped on stdin (as curl|zsh does)"
 # tmux is attached it reads the pty too and can swallow a later line, leaving the
 # shell waiting for an `exit` it never gets (flaked once on bookworm in CI).
 tmux -L handoff new-session -d -s probe 'sleep 120'
-printf '%s\n' 'tty > "$HOME/handoff-tty"; TERM=xterm tmux -L handoff attach -t probe \; detach-client >/dev/null 2>"$HOME/handoff-tmux-err"; echo $? > "$HOME/handoff-tmux-rc"; exit' \
+printf '%s\n' 'tty > "$HOME/handoff-tty"; env | grep -E "^(REPO_RAW|DOTFILES_REF)=" > "$HOME/handoff-env"; TERM=xterm tmux -L handoff attach -t probe \; detach-client >/dev/null 2>"$HOME/handoff-tmux-err"; echo $? > "$HOME/handoff-tmux-rc"; exit' \
   | timeout 600 script -qec "cat '$REPO/install' | REPO_RAW='file://$REPO' zsh" /dev/null >"$WORK/handoff.log" 2>&1 \
   || { tail -20 "$WORK/handoff.log"; fail "installer under a terminal did not finish"; }
 tmux -L handoff kill-server 2>/dev/null || true
@@ -317,6 +317,12 @@ case "$(cat "$HOME/handoff-tty" 2>/dev/null)" in
 esac
 [ "$(cat "$HOME/handoff-tmux-rc" 2>/dev/null)" = 0 ] \
   && pass "tmux attaches from the handed-off shell" || fail "tmux failed: $(cat "$HOME/handoff-tmux-err" 2>/dev/null)"
+# The installer runs with REPO_RAW (and, for a tag, DOTFILES_REF) set. If the shell it hands
+# over to keeps them, every later `curl ... | zsh` from that shell honors REPO_RAW as an
+# explicit override and reinstalls the same old tag (v2.8.0 stayed after v2.9.0 shipped).
+[ -e "$HOME/handoff-env" ] && [ ! -s "$HOME/handoff-env" ] \
+  && pass "handed-off shell does not inherit REPO_RAW or DOTFILES_REF" \
+  || fail "handed-off shell inherited: $(cat "$HOME/handoff-env" 2>/dev/null || echo 'no probe output')"
 
 note "VS Code machine settings"
 [ "$(jq -r '."workbench.secondarySideBar.defaultVisibility"' "$VSM")" = hidden ] \
