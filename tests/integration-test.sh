@@ -519,6 +519,7 @@ pfile="$A/context/topics/current-priority.md"; mkdir -p "${pfile%/*}"
 mkprio() { cat > "$pfile" <<EOF
 ## Standing priority
 - Date: 1999-01-01
+${4:+- Status: $4}
 ## Today's priority
 - Time zone: $1
 - Date: $2
@@ -530,6 +531,8 @@ EOF
 }
 pstart() { (cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.310 CLAUDE_MEMORY_SURFACE=Code CLAUDE_MEMORY_DIR="$A" env -u CLAUDE_CODE_SESSION_ATTENDED "$@" "$SYNC" start 2>/dev/null); }
 ahead="$(TZ=UTC-14 date +%F)"
+jq -e '.hooks.UserPromptSubmit[0].hooks[0].command | test("claude-memory-sync\" prompt$")' "$HOME/.claude/settings.json" >/dev/null \
+  && pass "settings: UserPromptSubmit hook runs claude-memory-sync prompt" || fail "prompt hook missing"
 rm -f "$pfile"
 [ -z "$(pstart)" ] && pass "no priority file: silent" || fail "printed without a priority file"
 mkprio UTC-14 "$ahead" "ship the post"
@@ -575,6 +578,39 @@ out="$(cd "$ws/tenant/deployment-configurations" && PATH="$vbin:$PATH" FAKE_CLAU
 p="$(grep -n "Today's priority" <<<"$out" | head -1 | cut -d: -f1)"; n="$(grep -n '===== Notes for' <<<"$out" | head -1 | cut -d: -f1)"
 [ -n "$p" ] && [ -n "$n" ] && [ "$p" -lt "$n" ] \
   && pass "priority comes before the notes (it must survive Claude Code's 2,000-character preview)" || fail "order: priority line ${p:-none}, notes line ${n:-none}"
+mkprio UTC-14 "$ahead" "ship the post" "confirmed 2026-11-20"
+grep -q "Today's priority" <<<"$(pstart)" \
+  && pass "standing priority confirmed: no blocker" || fail "confirmed status blocked"
+mkprio UTC-14 "$ahead" "ship the post" "Uncertain: the roadmap changed"
+out="$(pstart)"
+grep -q 'standing priority is marked uncertain' <<<"$out" && ! grep -q 'ship the post' <<<"$out" \
+  && pass "standing priority marked uncertain: blocks even with today's priority set" || fail "uncertain status: $out"
+mkprio UTC-14 2000-01-01 "old priority" "uncertain"
+grep -q "says '2000-01-01', and the standing priority is marked uncertain" <<<"$(pstart)" \
+  && pass "stale date and uncertain standing priority: one blocker names both" || fail "combined reasons wrong"
+
+# The prompt hook: a session left open past midnight asks again on its first prompt of the new day.
+export XDG_CACHE_HOME="$WORK/cache2"; sess="$XDG_CACHE_HOME/claude-memory-sync/sessions"
+pprompt() { jq -cn --arg s "$1" '{session_id:$s}' | (cd "$WORK/novcs" && CLAUDE_MEMORY_DIR="$A" env -u CLAUDE_CODE_SESSION_ATTENDED "${@:2}" "$SYNC" prompt 2>/dev/null); }
+mkprio UTC-14 "$ahead" "ship the post"
+echo '{"session_id":"p1","source":"startup"}' | pstart >/dev/null
+[ "$(cat "$sess/p1/priority-day")" = "$ahead" ] && [ -z "$(pprompt p1)" ] \
+  && pass "session start records the day; a same-day prompt is silent" || fail "same-day prompt hook printed or no day recorded"
+echo 2000-01-01 > "$sess/p1/priority-day"
+mkprio UTC-14 2000-01-01 "old priority"
+out="$(pprompt p1)"
+grep -q 'not set for today' <<<"$out" && [ "$(cat "$sess/p1/priority-day")" = "$ahead" ] && [ -z "$(pprompt p1)" ] \
+  && pass "first prompt of a new day: asks once, then silent" || fail "new-day prompt: $out"
+echo 2000-01-01 > "$sess/p1/priority-day"
+mkprio UTC-14 "$ahead" "a new day's priority"
+grep -q "Today's priority ($ahead, from .*): a new day's priority" <<<"$(pprompt p1)" \
+  && pass "new day, priority already set: printed" || fail "new-day priority not printed"
+echo 2000-01-01 > "$sess/p1/priority-day"
+[ -z "$(pprompt p1 CLAUDE_CODE_SESSION_ATTENDED=0)" ] && [ -z "$(pprompt '../x')" ] && [ -z "$(pprompt '')" ] \
+  && pass "prompt hook: silent when headless or the session id is missing or unsafe" || fail "prompt hook printed for headless or bad id"
+[ -n "$(pprompt p2)" ] && pass "a session the start hook never saw is checked on its first prompt" || fail "unseen session not checked"
+rm -f "$pfile"; [ -z "$(pprompt p3)" ] && pass "prompt hook without a priority file: silent" || fail "prompt hook printed without a file"
+unset XDG_CACHE_HOME
 rm -f "$pfile"
 
 note "ALL CHECKS PASSED"

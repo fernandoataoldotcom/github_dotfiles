@@ -107,10 +107,12 @@ Claude to "update the project notes" instead of running `/init`.
 
 **Daily priority.** If the memory repo has `context/topics/current-priority.md`, the
 session-start hook reads its "Today's priority" section. A Date line that is not
-today (in the time zone the file names, else the VM's) makes the hook tell Claude to
-ask you to decide the priority before any work; a current one is printed so Claude
-can keep you on it. Headless runs (`claude -p`, schedulers) skip the check, and a
-VM without the file prints nothing.
+today (in the time zone the file names, else the VM's), or a `- Status: uncertain`
+line under "Standing priority", makes the hook tell Claude to ask you to decide the
+priority before any work; a current one is printed so Claude can keep you on it. A
+UserPromptSubmit hook (`claude-memory-sync prompt`) repeats the check on the first
+prompt of a new day, so a session left open past midnight asks again. Headless runs
+(`claude -p`, schedulers) skip the check, and a VM without the file prints nothing.
 
 **Personal preferences in every session.** `claude-CLAUDE.md` is installed as
 `~/.claude/CLAUDE.md` and only imports `~/.claude-memory/context/preferences.md`,

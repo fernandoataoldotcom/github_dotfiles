@@ -22,6 +22,8 @@
 #   claude-memory-sync notes        print the notes (or the index) only
 #   claude-memory-sync touch        PreToolUse hook: add the notes for a repo the tool
 #                                   call works in, once per session, and log the load
+#   claude-memory-sync prompt       UserPromptSubmit hook: on the first prompt of a new
+#                                   day, check today's priority again
 #   claude-memory-sync pull         commit local changes, then rebase onto the remote
 #   claude-memory-sync push         commit local changes, rebase, push
 #   claude-memory-sync push-async   same as push, detached (hooks must return fast)
@@ -42,7 +44,7 @@ warn() { print -r -- "claude-memory-sync: $*" >&2; }
 # AND rebases need one, so it applies to every git call. `touch` never commits and
 # runs before every tool call, so it skips the lookup.
 IDENT=()
-[[ "${1:-}" == touch || -n "$(git -C "$DIR" config user.email 2>/dev/null)" ]] \
+[[ "${1:-}" == (touch|prompt) || -n "$(git -C "$DIR" config user.email 2>/dev/null)" ]] \
   || IDENT=(-c user.name=claude-memory-sync -c user.email=claude-memory-sync@localhost)
 g()    { GIT_TERMINAL_PROMPT=0 timeout 20 git -C "$DIR" "${IDENT[@]}" "$@"; }
 
@@ -264,42 +266,66 @@ version_check() {
 }
 
 # The user's daily priority is declared in context/topics/current-priority.md in the
-# memory repo. A priority not set for today blocks work until the user decides it, and
-# an instruction in a file the session may never open fails silently, so say it here.
-# When it is set, print it so the session can keep the user on it. The file names the
-# time zone its dates use ("- Time zone: ..." under "Today's priority"); without one,
-# the VM's local date counts. No file, no output.
+# memory repo. A priority not set for today, or a standing priority marked uncertain
+# ("- Status: uncertain" under "Standing priority"), blocks work until the user decides
+# it, and an instruction in a file the session may never open fails silently, so say it
+# here. When it is set, print it so the session can keep the user on it. The file names
+# the time zone its dates use ("- Time zone: ..." under "Today's priority"); without
+# one, the VM's local date counts. No file, no output. `start` checks at session start,
+# and `prompt` (a UserPromptSubmit hook) checks again on the first prompt of a new day,
+# so a session left open past midnight asks for the new day's priority too.
 PRIORITY_FILE="${DIR}/context/topics/current-priority.md"
+# "- Key: value" or "* Key: value" under one "## Section", tolerating CRLF and trailing
+# spaces (a round trip through an editor or a doc can add them).
+priority_field() { awk -v h="## $1" -v k="$2" '
+  { sub(/\r$/, "") }
+  /^## / { s = ($0 == h); next }
+  s && match($0, "^[-*] +" k ": *") { v = substr($0, RLENGTH + 1); sub(/ +$/, "", v); print v; exit }' "$PRIORITY_FILE"; }
+# Sets PRIORITY_DAY to today's date in the file's zone, and PRIORITY_NOTE when that zone
+# is unusable. TZ never fails: an unknown zone (a typo, or a VM without tzdata) silently
+# means UTC, which is the wrong day for hours every evening, so use the VM's date instead
+# and say so.
+priority_day() {
+  local tz; tz="$(priority_field "Today's priority" 'Time zone')"; PRIORITY_NOTE=""
+  if [[ -n "$tz" && ( ! "$tz" =~ '^[A-Za-z0-9_+:/.-]+$' || ( "$tz" == */* && ! -e "/usr/share/zoneinfo/$tz" ) ) ]]; then
+    PRIORITY_NOTE=" (The time zone '${tz[1,40]}' in that file is not available on this VM, so the VM's date was used.)"
+    tz=""
+  fi
+  if [[ -n "$tz" ]]; then PRIORITY_DAY="$(TZ="$tz" date +%F)"; else PRIORITY_DAY="$(date +%F)"; fi
+}
+# $1: the session's marker directory, where the day this session last checked is kept.
 priority_check() {
   [[ -r "$PRIORITY_FILE" ]] || return 0
   unattended && return 0   # nobody to ask: they use the standing priority
-  local tz day date prio why note=""
-  # "- Key: value" or "* Key: value", tolerating CRLF and trailing spaces (a round trip
-  # through an editor or a doc can add them).
-  field() { awk -v h="## Today's priority" -v k="$1" '
-    { sub(/\r$/, "") }
-    /^## / { s = ($0 == h); next }
-    s && match($0, "^[-*] +" k ": *") { v = substr($0, RLENGTH + 1); sub(/ +$/, "", v); print v; exit }' "$PRIORITY_FILE"; }
-  tz="$(field 'Time zone')"; date="$(field Date)"; prio="$(field Priority)"
-  # TZ never fails: an unknown zone (a typo, or a VM without tzdata) silently means UTC,
-  # which is the wrong day for hours every evening. Say so and use the VM's date instead.
-  if [[ -n "$tz" && ( ! "$tz" =~ '^[A-Za-z0-9_+:/.-]+$' || ( "$tz" == */* && ! -e "/usr/share/zoneinfo/$tz" ) ) ]]; then
-    note=" (The time zone '${tz[1,40]}' in that file is not available on this VM, so the VM's date was used.)"
-    tz=""
-  fi
-  if [[ -n "$tz" ]]; then day="$(TZ="$tz" date +%F)"; else day="$(date +%F)"; fi
-  if [[ "$date" != "$day" ]]; then
-    why="the Date line under \"Today's priority\" in ${PRIORITY_FILE} says '${date[1,40]:-missing}'"
+  # Not `status` or `path`: zsh makes them read-only or ties them to other variables.
+  local date prio standing; local -a why=()
+  priority_day
+  date="$(priority_field "Today's priority" Date)"; prio="$(priority_field "Today's priority" Priority)"
+  standing="$(priority_field 'Standing priority' Status)"
+  if [[ "$date" != "$PRIORITY_DAY" ]]; then
+    why+=("the Date line under \"Today's priority\" in ${PRIORITY_FILE} says '${date[1,40]:-missing}'")
   elif [[ -z "$prio" ]]; then
-    why="the Priority line under \"Today's priority\" in ${PRIORITY_FILE} is empty"
+    why+=("the Priority line under \"Today's priority\" in ${PRIORITY_FILE} is empty")
   fi
+  [[ "${(L)standing}" == uncertain* ]] && why+=("the standing priority is marked uncertain in ${PRIORITY_FILE}")
+  mark "$1" priority-day "$PRIORITY_DAY"
   print -r -- ""
-  if [[ -z "$why" ]]; then
+  if (( ! ${#why} )); then
     (( ${#prio} > 500 )) && prio="${prio[1,500]}... (cut here; the full text is in the file)"
-    print -r -- "Today's priority (${date}, from ${PRIORITY_FILE}): ${prio}${note}"
+    print -r -- "Today's priority (${date}, from ${PRIORITY_FILE}): ${prio}${PRIORITY_NOTE}"
   else
-    print -r -- "The user's priority is not set for today (${day}): ${why}.${note} Before starting any work, ask them to decide it: offer the standing priority in that file as the default, and ask what, if anything, outranks it today. Then record the answer under \"Today's priority\" (Date, Priority, Set by). Questions, status checks and farewells are not work."
+    print -r -- "The user's priority is not set for today (${PRIORITY_DAY}): ${(j:, and :)why}.${PRIORITY_NOTE} Before starting any work, ask them to decide it: offer the standing priority in that file as the default, and ask what, if anything, outranks it today. Then record the answer in that file (under \"Today's priority\": Date, Priority, Set by; and, if the standing priority changed, its Status line). Questions, status checks and farewells are not work."
   fi
+}
+# UserPromptSubmit hook: on the first prompt of a new day in a session that already
+# checked, check again. Silent otherwise, so it costs a few milliseconds per prompt.
+prompt_check() {
+  [[ -r "$PRIORITY_FILE" ]] || return 0
+  unattended && return 0
+  local sdir; sdir="$(session_dir "$(jq -r '.session_id // ""' 2>/dev/null)")" || return 0
+  priority_day
+  [[ -r "$sdir/priority-day" && "$(<"$sdir/priority-day")" == "$PRIORITY_DAY" ]] && return 0
+  priority_check "$sdir"
 }
 
 # One sync at a time; a lock left by a crashed run is cleared after 5 minutes.
@@ -325,7 +351,7 @@ case "${1:-}" in
     fi
     # The priority goes first: Claude Code replaces hook output over 10,000 characters
     # with a file path and a 2,000-character preview, and the blocker must survive that.
-    locked pull; priority_check; notes "$sdir"; version_check
+    locked pull; priority_check "$sdir"; notes "$sdir"; version_check
     # push-async discards stderr, so a hook without a surface would never be noticed.
     if [[ -z "$SURFACE" ]]; then
       print -r -- ""
@@ -334,6 +360,7 @@ case "${1:-}" in
     ;;
   (notes)     notes ;;
   (touch)     touch_repo ;;
+  (prompt)    prompt_check ;;
   (push-async)
     if command -v setsid >/dev/null 2>&1; then
       setsid "${0:A}" push </dev/null >/dev/null 2>&1 &!
@@ -342,7 +369,7 @@ case "${1:-}" in
     fi
     ;;
   (*)
-    warn "usage: claude-memory-sync start|notes|touch|pull|push|push-async"
+    warn "usage: claude-memory-sync start|notes|touch|prompt|pull|push|push-async"
     ;;
 esac
 exit 0
