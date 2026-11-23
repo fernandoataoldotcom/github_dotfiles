@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.9.0](https://github.com/fernandoataoldotcom/github_dotfiles/compare/v2.8.0...v2.9.0) (2026-11-23)
+
+
+### Features
+
+* **memory:** ask again after midnight and when the standing priority is uncertain ([d9fe92d](https://github.com/fernandoataoldotcom/github_dotfiles/commit/d9fe92d3ccd7da715a879d418ea6d023261bfb4d))
+* **memory:** tell the session to ask for today's priority when it is not set ([ff76390](https://github.com/fernandoataoldotcom/github_dotfiles/commit/ff76390f982a2aaa0a96cdd6c64d1fe11c65bea6))
+* **memory:** tell the session to ask for today's priority when it is not set ([352521d](https://github.com/fernandoataoldotcom/github_dotfiles/commit/352521de22c5c0ebcb7f48ffe174f3a551f37260))
+
+
+### Bug Fixes
+
+* **memory:** print the priority first, validate its time zone, tolerate formatting ([4c8f956](https://github.com/fernandoataoldotcom/github_dotfiles/commit/4c8f95644e3b55bdb87a38592c36c0751a0378d2))
+
 ## [2.8.0](https://github.com/fernandoataoldotcom/github_dotfiles/compare/v2.7.0...v2.8.0) (2026-11-21)
 
 
