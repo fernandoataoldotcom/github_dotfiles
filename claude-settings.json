@@ -48,6 +48,13 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "CLAUDE_MEMORY_SURFACE=Code \"$HOME/.local/bin/claude-memory-sync\" prompt", "timeout": 10 }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
