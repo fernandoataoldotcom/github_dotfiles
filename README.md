@@ -105,14 +105,17 @@ in it. Claude Code caps hook context at 10,000 characters, so notes longer than
 could not tie to a repo, to show whether the lazy loading misses anything. Ask
 Claude to "update the project notes" instead of running `/init`.
 
-**Daily priority.** If the memory repo has `context/topics/current-priority.md`, the
-session-start hook reads its "Today's priority" section. A Date line that is not
-today (in the time zone the file names, else the VM's), or a `- Status: uncertain`
-line under "Standing priority", makes the hook tell Claude to ask you to decide the
-priority before any work; a current one is printed so Claude can keep you on it. A
-UserPromptSubmit hook (`claude-memory-sync prompt`) repeats the check on the first
-prompt of a new day, so a session left open past midnight asks again. Headless runs
-(`claude -p`, schedulers) skip the check, and a VM without the file prints nothing.
+**Daily priority.** If the memory repo has `context/topics/current-priority.md`, its
+"Today's priority" section says where the day's priority lives (today a Google Sheet,
+which the hook cannot read). The session-start hook prints today's date in the time
+zone that section names (`- Time zone: ...`, else the VM's, and it says so) with the
+section's first Google link, and tells Claude to follow that pointer before any work
+and to ask you to decide the priority if there is no entry for today. A
+`- Status: uncertain` line under "Standing priority" adds the same ask for the standing
+priority. A UserPromptSubmit hook (`claude-memory-sync prompt`) repeats this on the
+first prompt of a new day, so a session left open past midnight asks again. Headless
+runs (`claude -p`, schedulers) skip the check, and a VM without the file prints
+nothing.
 
 **Personal preferences in every session.** `claude-CLAUDE.md` is installed as
 `~/.claude/CLAUDE.md` and only imports `~/.claude-memory/context/preferences.md`,
