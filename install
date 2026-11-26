@@ -462,10 +462,13 @@ main() {
   # stdin is the pipe, and a shell whose stdin is the /dev/tty alias breaks tmux
   # ("open terminal failed: can't use /dev/tty").
   if [[ -t 1 && -z "${DOTFILES_NO_EXEC:-}" ]]; then
-    # A tag install runs with REPO_RAW and DOTFILES_REF exported. The new shell must not
-    # inherit them: REPO_RAW is an explicit override, so every later `curl ... | zsh`
-    # from that shell would reinstall the same old tag.
-    unset REPO_RAW DOTFILES_REF
+    # The new shell must not inherit the installer's settings. A tag install runs with
+    # REPO_RAW and DOTFILES_REF exported, and REPO_RAW is an explicit override, so every
+    # later `curl ... | zsh` from that shell would reinstall the same old tag; the other
+    # knobs (DOTFILES_PICK opens the tag menu, the rest redirect the source or the memory
+    # repo) would quietly apply to the next install too.
+    unset REPO_RAW DOTFILES_REF DOTFILES_PICK DOTFILES_RAW_BASE DOTFILES_RESOLVE_ONLY \
+      REPO_SLUG CLAUDE_CHANNEL MEMORY_REPO
     exec zsh -l <&1
   fi
   print -r -- "Next: start a fresh shell ('exec zsh')."

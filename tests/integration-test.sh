@@ -307,8 +307,8 @@ note "Shell hand-off under a terminal, script piped on stdin (as curl|zsh does)"
 # tmux is attached it reads the pty too and can swallow a later line, leaving the
 # shell waiting for an `exit` it never gets (flaked once on bookworm in CI).
 tmux -L handoff new-session -d -s probe 'sleep 120'
-printf '%s\n' 'tty > "$HOME/handoff-tty"; env | grep -E "^(REPO_RAW|DOTFILES_REF)=" > "$HOME/handoff-env"; TERM=xterm tmux -L handoff attach -t probe \; detach-client >/dev/null 2>"$HOME/handoff-tmux-err"; echo $? > "$HOME/handoff-tmux-rc"; exit' \
-  | timeout 600 script -qec "cat '$REPO/install' | REPO_RAW='file://$REPO' zsh" /dev/null >"$WORK/handoff.log" 2>&1 \
+printf '%s\n' 'tty > "$HOME/handoff-tty"; env | grep -E "^(REPO_RAW|REPO_SLUG|DOTFILES_[A-Z_]+|CLAUDE_CHANNEL|MEMORY_REPO)=" > "$HOME/handoff-env"; TERM=xterm tmux -L handoff attach -t probe \; detach-client >/dev/null 2>"$HOME/handoff-tmux-err"; echo $? > "$HOME/handoff-tmux-rc"; exit' \
+  | timeout 600 script -qec "cat '$REPO/install' | REPO_RAW='file://$REPO' DOTFILES_REF=v0.0.0-test DOTFILES_PICK=1 zsh" /dev/null >"$WORK/handoff.log" 2>&1 \
   || { tail -20 "$WORK/handoff.log"; fail "installer under a terminal did not finish"; }
 tmux -L handoff kill-server 2>/dev/null || true
 case "$(cat "$HOME/handoff-tty" 2>/dev/null)" in
@@ -320,8 +320,10 @@ esac
 # The installer runs with REPO_RAW (and, for a tag, DOTFILES_REF) set. If the shell it hands
 # over to keeps them, every later `curl ... | zsh` from that shell honors REPO_RAW as an
 # explicit override and reinstalls the same old tag (v2.8.0 stayed after v2.9.0 shipped).
+# DOTFILES_REF and DOTFILES_PICK are set too (REPO_RAW makes the installer ignore them), so
+# the check covers every knob, not only the one that bit us.
 [ -e "$HOME/handoff-env" ] && [ ! -s "$HOME/handoff-env" ] \
-  && pass "handed-off shell does not inherit REPO_RAW or DOTFILES_REF" \
+  && pass "handed-off shell does not inherit the installer's settings (REPO_RAW, DOTFILES_*, ...)" \
   || fail "handed-off shell inherited: $(cat "$HOME/handoff-env" 2>/dev/null || echo 'no probe output')"
 
 note "VS Code machine settings"
