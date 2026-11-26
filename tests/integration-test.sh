@@ -520,97 +520,80 @@ unset XDG_CACHE_HOME
 
 note "claude-memory-sync: daily priority check"
 pfile="$A/context/topics/current-priority.md"; mkdir -p "${pfile%/*}"
-# POSIX zone names (UTC-14 is 14 h ahead of UTC): the container has no tzdata. A zone 14 h
-# ahead and one 12 h behind never share a date, so the date a file names tells them apart.
+# The file's "Today's priority" section says where the day's priority lives (a Google Sheet
+# the hook cannot read), so the hook prints today's date in the file's zone plus a pointer.
+# POSIX zone names (UTC-14 is 14 h ahead of UTC) because the container has no tzdata. A zone
+# 14 h ahead and one 12 h behind never share a date, so the printed date tells them apart.
+# The 1999 "Date:" lines are the old format: the hook must ignore them.
+URL=https://docs.google.com/spreadsheets/d/TESTSHEET/edit
 mkprio() { cat > "$pfile" <<EOF
 ## Standing priority
 - Date: 1999-01-01
-${4:+- Status: $4}
+${3:+- Status: $3}
 ## Today's priority
-- Time zone: $1
-- Date: $2
-- Priority: $3
-- Set by: test
+${1:+- Time zone: $1}
+${2:+See the [Time log]($2) for the daily priority.}
+- Date: 1999-01-01
 ## Rules
 - Date: 1999-01-01
 EOF
 }
 pstart() { (cd "$WORK/novcs" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.310 CLAUDE_MEMORY_SURFACE=Code CLAUDE_MEMORY_DIR="$A" env -u CLAUDE_CODE_SESSION_ATTENDED "$@" "$SYNC" start 2>/dev/null); }
-ahead="$(TZ=UTC-14 date +%F)"
+ahead="$(TZ=UTC-14 date +%F)"; behind="$(TZ=UTC+12 date +%F)"
 jq -e '.hooks.UserPromptSubmit[0].hooks[0].command | test("claude-memory-sync\" prompt$")' "$HOME/.claude/settings.json" >/dev/null \
   && pass "settings: UserPromptSubmit hook runs claude-memory-sync prompt" || fail "prompt hook missing"
 rm -f "$pfile"
 [ -z "$(pstart)" ] && pass "no priority file: silent" || fail "printed without a priority file"
-mkprio UTC-14 "$ahead" "ship the post"
+mkprio UTC-14 "$URL"
 out="$(pstart)"
-grep -q "Today's priority ($ahead, from .*): ship the post" <<<"$out" && ! grep -q 'not set' <<<"$out" \
-  && pass "priority set for today: printed, no blocker" || fail "set priority: $out"
-mkprio UTC-14 2000-01-01 "old priority"
+grep -qF "Today is $(TZ=UTC-14 date '+%a %b %-d') ($ahead) in the user's time zone." <<<"$out" && grep -qF "it points to $URL" <<<"$out" \
+  && grep -q 'Before starting any work' <<<"$out" && ! grep -q 'uncertain' <<<"$out" && ! grep -q 'Date line' <<<"$out" \
+  && pass "start prints today's date in the file's zone and the pointer, and ignores old Date lines" || fail "pointer output: $out"
+mkprio UTC+12 "$URL"
 out="$(pstart)"
-grep -q "not set for today ($ahead)" <<<"$out" && grep -q 'Before starting any work, ask' <<<"$out" && ! grep -q 'old priority' <<<"$out" \
-  && pass "stale date: tells the session to ask before any work" || fail "stale priority: $out"
-mkprio UTC+12 "$ahead" "ship the post"
-grep -q 'not set for today' <<<"$(pstart)" \
-  && pass "the time zone in the file decides what today is" || fail "time zone ignored"
-mkprio "" "$(date +%F)" "ship the post"
-grep -q "Today's priority" <<<"$(pstart)" \
-  && pass "no time zone in the file: the VM's date counts" || fail "local date not used"
-mkprio UTC-14 "$ahead" ""
-grep -q 'not set for today' <<<"$(pstart)" \
-  && pass "date set but no priority text: still blocks" || fail "empty priority accepted"
-mkprio UTC-14 "not a date" "ship the post"
-grep -q "says 'not a date'" <<<"$(pstart)" \
-  && pass "garbage date: blocks" || fail "garbage date accepted"
-mkprio UTC-14 2000-01-01 "old priority"
+grep -qF "($behind)" <<<"$out" && ! grep -qF "($ahead)" <<<"$out" \
+  && pass "the time zone in the file decides what today is" || fail "time zone ignored: $out"
+mkprio "" "$URL"
+out="$(pstart)"
+grep -qF "($(date +%F))" <<<"$out" && grep -q 'names no time zone' <<<"$out" \
+  && pass "no time zone in the file: the VM's date is used and the session is told" || fail "no-zone output: $out"
+mkprio Mars/Olympus "$URL"
+out="$(pstart)"
+grep -qF "($(date +%F))" <<<"$out" && grep -q "'Mars/Olympus' in that file is not available" <<<"$out" \
+  && pass "unknown time zone: the VM's date is used and the session is told" || fail "unknown zone output: $out"
+printf '%s\r\n* Time zone:   UTC-14  \r\n* See the [Time log](%s) for it.\r\n' "## Today's priority" "$URL" > "$pfile"
+out="$(pstart)"
+grep -qF "($ahead)" <<<"$out" && grep -qF "it points to $URL" <<<"$out" \
+  && pass "CRLF line endings, '*' bullets and stray spaces still parse" || fail "formatting variations: $out"
+mkprio UTC-14 ""
+out="$(pstart)"
+grep -q 'Before starting any work' <<<"$out" && ! grep -q 'it points to' <<<"$out" \
+  && pass "no link in the section: still prints the instruction, without a pointer" || fail "no-link output: $out"
+mkprio UTC-14 "$URL"
 [ -z "$(pstart CLAUDE_CODE_SESSION_ATTENDED=0)" ] \
   && pass "headless session: no blocker (nobody to ask)" || fail "headless run printed a blocker"
-mkprio UTC-14 "$ahead" ""
-out="$(pstart)"
-grep -q 'Priority line .* is empty' <<<"$out" && ! grep -q "says '" <<<"$out" \
-  && pass "empty priority text: names the empty line, not a contradictory date" || fail "empty priority message: $out"
-printf '%s\r\n* Time zone: UTC-14\r\n* Date: %s\r\n* Priority:   ship the post  \r\n' "## Today's priority" "$ahead" > "$pfile"
-grep -q "Today's priority ($ahead, from .*): ship the post$" <<<"$(pstart)" \
-  && pass "CRLF line endings, '*' bullets and stray spaces still parse" || fail "formatting variations not parsed"
-mkprio Mars/Olympus "$(date +%F)" "ship the post"
-out="$(pstart)"
-grep -q "Today's priority" <<<"$out" && grep -q "'Mars/Olympus' in that file is not available" <<<"$out" \
-  && pass "unknown time zone: the VM's date is used and the session is told" || fail "unknown time zone: $out"
-mkprio UTC-14 "$ahead" "$(printf 'x%.0s' $(seq 600))"
-out="$(pstart)"
-grep -q 'cut here; the full text is in the file' <<<"$out" && [ "${#out}" -lt 900 ] \
-  && pass "long priority: cut with a pointer to the file" || fail "long priority: ${#out} characters"
-mkprio UTC-14 "$ahead" "ship the post"
+mkprio UTC-14 "$URL" "confirmed 2026-11-20"
+! grep -q 'uncertain' <<<"$(pstart)" \
+  && pass "standing priority confirmed: no extra blocker" || fail "confirmed status blocked"
+mkprio UTC-14 "$URL" "Uncertain: the roadmap changed"
+grep -q 'standing priority is also marked uncertain' <<<"$(pstart)" \
+  && pass "standing priority marked uncertain: says so" || fail "uncertain status not reported"
+mkprio UTC-14 "$URL"
 out="$(cd "$ws/tenant/deployment-configurations" && PATH="$vbin:$PATH" FAKE_CLAUDE_VERSION=2.1.310 CLAUDE_MEMORY_SURFACE=Code CLAUDE_MEMORY_DIR="$A" env -u CLAUDE_CODE_SESSION_ATTENDED "$SYNC" start 2>/dev/null)"
-p="$(grep -n "Today's priority" <<<"$out" | head -1 | cut -d: -f1)"; n="$(grep -n '===== Notes for' <<<"$out" | head -1 | cut -d: -f1)"
+p="$(grep -n "^Today is" <<<"$out" | head -1 | cut -d: -f1)"; n="$(grep -n '===== Notes for' <<<"$out" | head -1 | cut -d: -f1)"
 [ -n "$p" ] && [ -n "$n" ] && [ "$p" -lt "$n" ] \
-  && pass "priority comes before the notes (it must survive Claude Code's 2,000-character preview)" || fail "order: priority line ${p:-none}, notes line ${n:-none}"
-mkprio UTC-14 "$ahead" "ship the post" "confirmed 2026-11-20"
-grep -q "Today's priority" <<<"$(pstart)" \
-  && pass "standing priority confirmed: no blocker" || fail "confirmed status blocked"
-mkprio UTC-14 "$ahead" "ship the post" "Uncertain: the roadmap changed"
-out="$(pstart)"
-grep -q 'standing priority is marked uncertain' <<<"$out" && ! grep -q 'ship the post' <<<"$out" \
-  && pass "standing priority marked uncertain: blocks even with today's priority set" || fail "uncertain status: $out"
-mkprio UTC-14 2000-01-01 "old priority" "uncertain"
-grep -q "says '2000-01-01', and the standing priority is marked uncertain" <<<"$(pstart)" \
-  && pass "stale date and uncertain standing priority: one blocker names both" || fail "combined reasons wrong"
+  && pass "the priority instruction comes before the notes (it must survive Claude Code's 2,000-character preview)" || fail "order: priority line ${p:-none}, notes line ${n:-none}"
 
 # The prompt hook: a session left open past midnight asks again on its first prompt of the new day.
 export XDG_CACHE_HOME="$WORK/cache2"; sess="$XDG_CACHE_HOME/claude-memory-sync/sessions"
 pprompt() { jq -cn --arg s "$1" '{session_id:$s}' | (cd "$WORK/novcs" && CLAUDE_MEMORY_DIR="$A" env -u CLAUDE_CODE_SESSION_ATTENDED "${@:2}" "$SYNC" prompt 2>/dev/null); }
-mkprio UTC-14 "$ahead" "ship the post"
 echo '{"session_id":"p1","source":"startup"}' | pstart >/dev/null
 [ "$(cat "$sess/p1/priority-day")" = "$ahead" ] && [ -z "$(pprompt p1)" ] \
   && pass "session start records the day; a same-day prompt is silent" || fail "same-day prompt hook printed or no day recorded"
 echo 2000-01-01 > "$sess/p1/priority-day"
-mkprio UTC-14 2000-01-01 "old priority"
 out="$(pprompt p1)"
-grep -q 'not set for today' <<<"$out" && [ "$(cat "$sess/p1/priority-day")" = "$ahead" ] && [ -z "$(pprompt p1)" ] \
+grep -qF "($ahead)" <<<"$out" && [ "$(cat "$sess/p1/priority-day")" = "$ahead" ] && [ -z "$(pprompt p1)" ] \
   && pass "first prompt of a new day: asks once, then silent" || fail "new-day prompt: $out"
-echo 2000-01-01 > "$sess/p1/priority-day"
-mkprio UTC-14 "$ahead" "a new day's priority"
-grep -q "Today's priority ($ahead, from .*): a new day's priority" <<<"$(pprompt p1)" \
-  && pass "new day, priority already set: printed" || fail "new-day priority not printed"
 echo 2000-01-01 > "$sess/p1/priority-day"
 [ -z "$(pprompt p1 CLAUDE_CODE_SESSION_ATTENDED=0)" ] && [ -z "$(pprompt '../x')" ] && [ -z "$(pprompt '')" ] \
   && pass "prompt hook: silent when headless or the session id is missing or unsafe" || fail "prompt hook printed for headless or bad id"

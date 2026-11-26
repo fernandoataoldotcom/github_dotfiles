@@ -266,14 +266,17 @@ version_check() {
 }
 
 # The user's daily priority is declared in context/topics/current-priority.md in the
-# memory repo. A priority not set for today, or a standing priority marked uncertain
-# ("- Status: uncertain" under "Standing priority"), blocks work until the user decides
-# it, and an instruction in a file the session may never open fails silently, so say it
-# here. When it is set, print it so the session can keep the user on it. The file names
-# the time zone its dates use ("- Time zone: ..." under "Today's priority"); without
-# one, the VM's local date counts. No file, no output. `start` checks at session start,
-# and `prompt` (a UserPromptSubmit hook) checks again on the first prompt of a new day,
-# so a session left open past midnight asks for the new day's priority too.
+# memory repo, and that file's "Today's priority" section says where the day's priority
+# actually lives (today a Google Sheet, which this script cannot read). An unset priority,
+# or a standing priority marked uncertain ("- Status: uncertain" under "Standing
+# priority"), blocks work until the user decides it, and an instruction in a file the
+# session may never open fails silently, so say it here: print today's date in the user's
+# time zone ("- Time zone: ..." under "Today's priority"; without one the VM's date counts,
+# and the output says so) and tell the session to follow that section's pointer. Nothing
+# else about where or how the priority is stored is assumed, so changing that does not
+# break this. No file, no output. `start` checks at session start, and `prompt` (a
+# UserPromptSubmit hook) checks again on the first prompt of a new day, so a session left
+# open past midnight asks for the new day's priority too.
 PRIORITY_FILE="${DIR}/context/topics/current-priority.md"
 # "- Key: value" or "* Key: value" under one "## Section", tolerating CRLF and trailing
 # spaces (a round trip through an editor or a doc can add them).
@@ -287,34 +290,37 @@ priority_field() { awk -v h="## $1" -v k="$2" '
 # and say so.
 priority_day() {
   local tz; tz="$(priority_field "Today's priority" 'Time zone')"; PRIORITY_NOTE=""
-  if [[ -n "$tz" && ( ! "$tz" =~ '^[A-Za-z0-9_+:/.-]+$' || ( "$tz" == */* && ! -e "/usr/share/zoneinfo/$tz" ) ) ]]; then
+  if [[ -z "$tz" ]]; then
+    PRIORITY_NOTE=" (That file names no time zone, so the VM's date was used.)"
+  elif [[ ! "$tz" =~ '^[A-Za-z0-9_+:/.-]+$' || ( "$tz" == */* && ! -e "/usr/share/zoneinfo/$tz" ) ]]; then
     PRIORITY_NOTE=" (The time zone '${tz[1,40]}' in that file is not available on this VM, so the VM's date was used.)"
     tz=""
   fi
-  if [[ -n "$tz" ]]; then PRIORITY_DAY="$(TZ="$tz" date +%F)"; else PRIORITY_DAY="$(date +%F)"; fi
+  if [[ -n "$tz" ]]; then
+    PRIORITY_DAY="$(TZ="$tz" date +%F)"; PRIORITY_LABEL="$(TZ="$tz" date '+%a %b %-d')"
+  else
+    PRIORITY_DAY="$(date +%F)"; PRIORITY_LABEL="$(date '+%a %b %-d')"
+  fi
 }
 # $1: the session's marker directory, where the day this session last checked is kept.
 priority_check() {
   [[ -r "$PRIORITY_FILE" ]] || return 0
   unattended && return 0   # nobody to ask: they use the standing priority
   # Not `status` or `path`: zsh makes them read-only or ties them to other variables.
-  local date prio standing; local -a why=()
-  priority_day
-  date="$(priority_field "Today's priority" Date)"; prio="$(priority_field "Today's priority" Priority)"
+  local standing url where; priority_day
   standing="$(priority_field 'Standing priority' Status)"
-  if [[ "$date" != "$PRIORITY_DAY" ]]; then
-    why+=("the Date line under \"Today's priority\" in ${PRIORITY_FILE} says '${date[1,40]:-missing}'")
-  elif [[ -z "$prio" ]]; then
-    why+=("the Priority line under \"Today's priority\" in ${PRIORITY_FILE} is empty")
-  fi
-  [[ "${(L)standing}" == uncertain* ]] && why+=("the standing priority is marked uncertain in ${PRIORITY_FILE}")
+  # The first Google link in that section is where the day's priority lives; the file is
+  # in the private memory repo, so the link stays out of this public one.
+  url="$(awk -v h="## Today's priority" '
+    { sub(/\r$/, "") }
+    /^## / { s = ($0 == h); next }
+    s && match($0, /https:\/\/docs\.google\.com\/[^) >]+/) { print substr($0, RSTART, RLENGTH); exit }' "$PRIORITY_FILE")"
+  where="the \"Today's priority\" section of ${PRIORITY_FILE}${url:+ (it points to ${url[1,200]})}"
   mark "$1" priority-day "$PRIORITY_DAY"
   print -r -- ""
-  if (( ! ${#why} )); then
-    (( ${#prio} > 500 )) && prio="${prio[1,500]}... (cut here; the full text is in the file)"
-    print -r -- "Today's priority (${date}, from ${PRIORITY_FILE}): ${prio}${PRIORITY_NOTE}"
-  else
-    print -r -- "The user's priority is not set for today (${PRIORITY_DAY}): ${(j:, and :)why}.${PRIORITY_NOTE} Before starting any work, ask them to decide it: offer the standing priority in that file as the default, and ask what, if anything, outranks it today. Then record the answer in that file (under \"Today's priority\": Date, Priority, Set by; and, if the standing priority changed, its Status line). Questions, status checks and farewells are not work."
+  print -r -- "Today is ${PRIORITY_LABEL} (${PRIORITY_DAY}) in the user's time zone.${PRIORITY_NOTE} Before starting any work, find the user's priority for today by following ${where}. If it has no entry for today, the priority is not set: ask them to decide it, offering the standing priority in that file as the default and asking what, if anything, outranks it today, then record the answer where that section says. A session that cannot reach what the section points to asks the user for the priority and does not write it into the file. Questions, status checks and farewells are not work."
+  if [[ "${(L)standing}" == uncertain* ]]; then
+    print -r -- "The standing priority is also marked uncertain in ${PRIORITY_FILE}: ask them to decide it too."
   fi
 }
 # UserPromptSubmit hook: on the first prompt of a new day in a session that already
