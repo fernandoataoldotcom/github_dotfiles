@@ -278,12 +278,16 @@ version_check() {
 # UserPromptSubmit hook) checks again on the first prompt of a new day, so a session left
 # open past midnight asks for the new day's priority too.
 PRIORITY_FILE="${DIR}/context/topics/current-priority.md"
-# "- Key: value" or "* Key: value" under one "## Section", tolerating CRLF and trailing
-# spaces (a round trip through an editor or a doc can add them).
-priority_field() { awk -v h="## $1" -v k="$2" '
-  { sub(/\r$/, "") }
-  /^## / { s = ($0 == h); next }
-  s && match($0, "^[-*] +" k ": *") { v = substr($0, RLENGTH + 1); sub(/ +$/, "", v); print v; exit }' "$PRIORITY_FILE"; }
+# The lines of one "## Section" of the priority file, without CR (a round trip through an
+# editor or a doc can add them). Every reader goes through this one parser.
+priority_section() { awk -v h="## $1" '{ sub(/\r$/, "") } /^## / { s = ($0 == h); next } s' "$PRIORITY_FILE"; }
+# "- Key: value" or "* Key: value" in one section, tolerating trailing spaces.
+priority_field() { priority_section "$1" | awk -v k="$2" '
+  match($0, "^[-*] +" k ": *") { v = substr($0, RLENGTH + 1); sub(/ +$/, "", v); print v; exit }'; }
+# The first Google link (docs, drive, sheets ...) in one section, without trailing
+# punctuation or markup, so a bare link ending a sentence or set in **bold** still works.
+priority_link() { priority_section "$1" | awk '
+  match($0, /https:\/\/[a-z.]*google\.com\/[^ )>]+/) { u = substr($0, RSTART, RLENGTH); sub(/[].,;:!?*_]+$/, "", u); print u; exit }'; }
 # Sets PRIORITY_DAY to today's date in the file's zone, and PRIORITY_NOTE when that zone
 # is unusable. TZ never fails: an unknown zone (a typo, or a VM without tzdata) silently
 # means UTC, which is the wrong day for hours every evening, so use the VM's date instead
@@ -296,11 +300,15 @@ priority_day() {
     PRIORITY_NOTE=" (The time zone '${tz[1,40]}' in that file is not available on this VM, so the VM's date was used.)"
     tz=""
   fi
+  # One `date` call, so the ISO date and the label cannot straddle midnight, and the
+  # per-prompt hook forks once.
+  local d
   if [[ -n "$tz" ]]; then
-    PRIORITY_DAY="$(TZ="$tz" date +%F)"; PRIORITY_LABEL="$(TZ="$tz" date '+%a %b %-d')"
+    d="$(TZ="$tz" date '+%F|%a %b %-d')"; PRIORITY_WHOSE="in the user's time zone"
   else
-    PRIORITY_DAY="$(date +%F)"; PRIORITY_LABEL="$(date '+%a %b %-d')"
+    d="$(date '+%F|%a %b %-d')"; PRIORITY_WHOSE="by the VM's clock, which may not be the user's date"
   fi
+  PRIORITY_DAY="${d%%|*}"; PRIORITY_LABEL="${d#*|}"
 }
 # $1: the session's marker directory, where the day this session last checked is kept.
 priority_check() {
@@ -311,14 +319,11 @@ priority_check() {
   standing="$(priority_field 'Standing priority' Status)"
   # The first Google link in that section is where the day's priority lives; the file is
   # in the private memory repo, so the link stays out of this public one.
-  url="$(awk -v h="## Today's priority" '
-    { sub(/\r$/, "") }
-    /^## / { s = ($0 == h); next }
-    s && match($0, /https:\/\/docs\.google\.com\/[^) >]+/) { print substr($0, RSTART, RLENGTH); exit }' "$PRIORITY_FILE")"
-  where="the \"Today's priority\" section of ${PRIORITY_FILE}${url:+ (it points to ${url[1,200]})}"
+  url="$(priority_link "Today's priority")"
+  where="the \"Today's priority\" section of ${PRIORITY_FILE}${url:+ (it points to ${url[1,500]})}"
   mark "$1" priority-day "$PRIORITY_DAY"
   print -r -- ""
-  print -r -- "Today is ${PRIORITY_LABEL} (${PRIORITY_DAY}) in the user's time zone.${PRIORITY_NOTE} Before starting any work, find the user's priority for today by following ${where}. If it has no entry for today, the priority is not set: ask them to decide it, offering the standing priority in that file as the default and asking what, if anything, outranks it today, then record the answer where that section says. A session that cannot reach what the section points to asks the user for the priority and does not write it into the file. Questions, status checks and farewells are not work."
+  print -r -- "Today is ${PRIORITY_LABEL} (${PRIORITY_DAY}) ${PRIORITY_WHOSE}.${PRIORITY_NOTE} Before starting any work, find the user's priority for today by following ${where}. If it has no entry for today, the priority is not set: ask them to decide it, offering the standing priority in that file as the default and asking what, if anything, outranks it today, then record the answer where that section says. A session that cannot reach what the section points to asks the user for the priority and does not write it into the file. Questions, status checks and farewells are not work."
   if [[ "${(L)standing}" == uncertain* ]]; then
     print -r -- "The standing priority is also marked uncertain in ${PRIORITY_FILE}: ask them to decide it too."
   fi
@@ -357,7 +362,9 @@ case "${1:-}" in
     fi
     # The priority goes first: Claude Code replaces hook output over 10,000 characters
     # with a file path and a 2,000-character preview, and the blocker must survive that.
-    locked pull; priority_check "$sdir"; notes "$sdir"; version_check
+    # In a subshell: a zsh error there (a read-only variable aborted it once) must not take
+    # the notes and the version check down with it.
+    locked pull; ( priority_check "$sdir" ); notes "$sdir"; version_check
     # push-async discards stderr, so a hook without a surface would never be noticed.
     if [[ -z "$SURFACE" ]]; then
       print -r -- ""

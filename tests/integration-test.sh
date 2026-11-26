@@ -558,11 +558,13 @@ grep -qF "($behind)" <<<"$out" && ! grep -qF "($ahead)" <<<"$out" \
 mkprio "" "$URL"
 out="$(pstart)"
 grep -qF "($(date +%F))" <<<"$out" && grep -q 'names no time zone' <<<"$out" \
-  && pass "no time zone in the file: the VM's date is used and the session is told" || fail "no-zone output: $out"
+  && grep -q "by the VM's clock" <<<"$out" && ! grep -q "in the user's time zone" <<<"$out" \
+  && pass "no time zone in the file: the VM's date is used, and not called the user's" || fail "no-zone output: $out"
 mkprio Mars/Olympus "$URL"
 out="$(pstart)"
 grep -qF "($(date +%F))" <<<"$out" && grep -q "'Mars/Olympus' in that file is not available" <<<"$out" \
-  && pass "unknown time zone: the VM's date is used and the session is told" || fail "unknown zone output: $out"
+  && grep -q "by the VM's clock" <<<"$out" && ! grep -q "in the user's time zone" <<<"$out" \
+  && pass "unknown time zone: the VM's date is used, and not called the user's" || fail "unknown zone output: $out"
 printf '%s\r\n* Time zone:   UTC-14  \r\n* See the [Time log](%s) for it.\r\n' "## Today's priority" "$URL" > "$pfile"
 out="$(pstart)"
 grep -qF "($ahead)" <<<"$out" && grep -qF "it points to $URL" <<<"$out" \
@@ -571,6 +573,12 @@ mkprio UTC-14 ""
 out="$(pstart)"
 grep -q 'Before starting any work' <<<"$out" && ! grep -q 'it points to' <<<"$out" \
   && pass "no link in the section: still prints the instruction, without a pointer" || fail "no-link output: $out"
+printf '%s\n' "## Today's priority" '- Time zone: UTC-14' "- See **$URL**." > "$pfile"
+grep -qF "it points to $URL)" <<<"$(pstart)" \
+  && pass "a bare link in bold at the end of a sentence: no markup or period in the pointer" || fail "bold link pointer wrong"
+printf '%s\n' "## Today's priority" '- Time zone: UTC-14' '- See https://drive.google.com/file/d/TESTFILE/view' > "$pfile"
+grep -qF "it points to https://drive.google.com/file/d/TESTFILE/view)" <<<"$(pstart)" \
+  && pass "a drive.google.com link counts as the pointer too" || fail "drive link not used"
 mkprio UTC-14 "$URL"
 [ -z "$(pstart CLAUDE_CODE_SESSION_ATTENDED=0)" ] \
   && pass "headless session: no blocker (nobody to ask)" || fail "headless run printed a blocker"
