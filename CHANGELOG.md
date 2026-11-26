@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.9.1](https://github.com/fernandoataoldotcom/github_dotfiles/compare/v2.9.0...v2.9.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **install:** do not hand the pinned REPO_RAW and DOTFILES_REF to the new shell ([3b5d8ea](https://github.com/fernandoataoldotcom/github_dotfiles/commit/3b5d8eaa8d187ef55377bccbd8a73326fb5c57b9))
+* installer env leak on reinstall, and point the session-start priority check at the Time log ([6be75e6](https://github.com/fernandoataoldotcom/github_dotfiles/commit/6be75e691df8b83f7c35e18b0aac00ccf0bca5b6))
+* **memory:** point sessions at the day's priority instead of reading a Date line ([bc080ab](https://github.com/fernandoataoldotcom/github_dotfiles/commit/bc080abf6fa1901bd0d71fe62fd5cb7b5bd6710a))
+
 ## [2.9.0](https://github.com/fernandoataoldotcom/github_dotfiles/compare/v2.8.0...v2.9.0) (2026-11-23)
 
 
